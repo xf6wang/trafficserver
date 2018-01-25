@@ -18,49 +18,57 @@
 
 import os
 Test.Summary = '''
-Test transactions and sessions, making sure two continuations catch the same number of hooks.
+Test transactions and sessions for http2, making sure the two continuations catch the same number of hooks.
 '''
 Test.SkipUnless(
-    Condition.HasProgram("curl", "Curl needs to be installed on system for this test to work")
+    Condition.HasProgram("curl", "Curl needs to be installed on system for this test to work"),
+    Condition.HasCurlFeature('http2')
 )
 Test.ContinueOnFail = True
 # Define default ATS
-ts = Test.MakeATSProcess("ts", command="traffic_manager")
-
+ts = Test.MakeATSProcess("ts", select_ports=False, command="traffic_manager")
 server = Test.MakeOriginServer("server")
 
 Test.testName = ""
-request_header = {"headers": "GET / HTTP/1.1\r\n\r\n", "timestamp": "1469733493.993", "body": ""}
+request_header = {"headers": "GET / HTTP/1.1\r\nHost: www.example.com\r\n\r\n", "timestamp": "1469733493.993", "body": ""}
 # expected response from the origin server
-response_header = {"headers": "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n", "timestamp": "1469733493.993", "body": ""}
-
-Test.PreparePlugin(os.path.join(Test.Variables.AtsTestToolsDir, 'plugins', 'continuations_verify.cc'), ts)
+response_header = {"headers": "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n",
+                   "timestamp": "1469733493.993", "body": ""}
 
 # add response to the server dictionary
 server.addResponse("sessionfile.log", request_header, response_header)
-ts.Disk.records_config.update({
-    'proxy.config.diags.debug.enabled': 1,
-    'proxy.config.diags.debug.tags': 'continuations_verify.*',
-    'proxy.config.http.cache.http' : 0, #disable cache to simply the test.
-    'proxy.config.cache.enable_read_while_writer' : 0
-})
+
+# add ssl materials like key, certificates for the server
+ts.addSSLfile("ssl/server.pem")
+ts.addSSLfile("ssl/server.key")
+
+# add port and remap rule
+ts.Variables.ssl_port = 4443
 ts.Disk.remap_config.AddLine(
-    'map http://127.0.0.1:{0} http://127.0.0.1:{1}'.format(ts.Variables.port, server.Variables.Port)
+    'map / http://127.0.0.1:{0}'.format(server.Variables.Port)
 )
 
-cmdstr = 'curl -k -vs http://127.0.0.1:{0}'.format(ts.Variables.port)
-numberOfRequests = 3
+ts.Disk.ssl_multicert_config.AddLine(
+    'dest_ip=* ssl_cert_name=server.pem ssl_key_name=server.key'
+)
 
-# Make calls to the proxy!
-tr = Test.AddTestRun()
-tr.Processes.Default.Command = 'sleep 10' # ensure stats updated
-tr.Processes.Default.ReturnCode = 0
-tr.Processes.Default.StartBefore(server, ready=When.PortOpen(server.Variables.Port))
-tr.Processes.Default.StartBefore(ts, ready=When.PortOpen(ts.Variables.port))
-tr.Processes.Default.StartAfter( 
-    *Test.ParallelizeCommand(tr, numberOfRequests, cmdstr)
-    )
-tr.StillRunningAfter = ts
+ts.Disk.records_config.update({
+    'proxy.config.diags.debug.enabled': 1,
+    'proxy.config.diags.debug.tags': 'ssntxnorder_verify.*',
+    'proxy.config.ssl.server.cert.path': '{0}'.format(ts.Variables.SSLDir),
+    'proxy.config.ssl.server.private_key.path': '{0}'.format(ts.Variables.SSLDir),
+    'proxy.config.http.cache.http': 0,  # disable cache to simply the test.
+    'proxy.config.cache.enable_read_while_writer': 0,
+     # enable ssl port
+    'proxy.config.http.server_ports': '{0} {1}:proto=http2;http:ssl'.format(ts.Variables.port, ts.Variables.ssl_port),
+    'proxy.config.ssl.client.verify.server':  0,
+    'proxy.config.ssl.server.cipher_suite': 'ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES128-SHA256:ECDHE-RSA-AES256-SHA384:AES128-GCM-SHA256:AES256-GCM-SHA384:ECDHE-RSA-RC4-SHA:ECDHE-RSA-AES128-SHA:ECDHE-RSA-AES256-SHA:RC4-SHA:RC4-MD5:AES128-SHA:AES256-SHA:DES-CBC3-SHA!SRP:!DSS:!PSK:!aNULL:!eNULL:!SSLv2',
+    'proxy.config.http2.max_concurrent_streams_in': 65535
+})
+
+# add plugin to assist with test metrics
+Test.PreparePlugin(os.path.join(Test.Variables.AtsTestToolsDir,
+                                 'plugins', 'continuations_verify.cc'), ts)
 
 comparator_command = '''
 if test "`traffic_ctl metric get continuations_verify.{0}.close.1 | cut -d ' ' -f 2`" -eq "`traffic_ctl metric get continuations_verify.{0}.close.2 | cut -d ' ' -f 2`" ; then\
@@ -70,6 +78,22 @@ if test "`traffic_ctl metric get continuations_verify.{0}.close.1 | cut -d ' ' -
     fi;
     '''
 
+cmdstr = 'curl --http2 -k -vs https://127.0.0.1:{0}'.format(ts.Variables.ssl_port)
+numberOfRequests = 3
+
+tr = Test.AddTestRun()
+# curl with http2
+tr.Processes.Default.Command = 'sleep 10' # ensure stats updated
+tr.Processes.Default.ReturnCode = 0
+# time delay as proxy.config.http.wait_for_cache could be broken
+tr.Processes.Default.StartBefore(server, ready=When.PortOpen(server.Variables.Port))
+tr.Processes.Default.StartBefore(ts, ready=When.PortOpen(ts.Variables.ssl_port))
+tr.Processes.Default.StartAfter( 
+    *Test.ParallelizeCommand(tr, numberOfRequests, cmdstr)
+    )
+tr.StillRunningAfter = ts
+
+# Watch the records snapshot file.
 records = ts.Disk.File(os.path.join(ts.Variables.RUNTIMEDIR, "records.snap"))
 
 # number of sessions/transactions opened and closed are equal
@@ -80,6 +104,7 @@ tr.Processes.Default.ReturnCode = 0
 tr.Processes.Default.Env = ts.Env
 tr.Processes.Default.Streams.stdout = Testers.ContainsExpression("yes", 'should verify contents')
 tr.StillRunningAfter = ts
+
 # for debugging session number
 ssn1 = tr.Processes.Process("session1", 'traffic_ctl metric get continuations_verify.ssn.close.1 > ssn1')
 ssn2 = tr.Processes.Process("session2", 'traffic_ctl metric get continuations_verify.ssn.close.2 > ssn2')
@@ -94,6 +119,7 @@ tr.Processes.Default.ReturnCode = 0
 tr.Processes.Default.Env = ts.Env
 tr.Processes.Default.Streams.stdout = Testers.ContainsExpression("yes", 'should verify contents')
 tr.StillRunningAfter = ts
+
 # for debugging transaction number
 txn1 = tr.Processes.Process("transaction1", 'traffic_ctl metric get continuations_verify.txn.close.1 > txn1')
 txn2 = tr.Processes.Process("transaction2", 'traffic_ctl metric get continuations_verify.txn.close.2 > txn2')

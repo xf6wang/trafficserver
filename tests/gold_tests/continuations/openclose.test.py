@@ -18,7 +18,7 @@
 
 import os
 Test.Summary = '''
-Test transactions and sessions, making sure two continuations catch the same number of hooks.
+Test transactions and sessions, making sure they open and close in the proper order.
 '''
 Test.SkipUnless(
     Condition.HasProgram("curl", "Curl needs to be installed on system for this test to work")
@@ -30,22 +30,27 @@ ts = Test.MakeATSProcess("ts", command="traffic_manager")
 server = Test.MakeOriginServer("server")
 
 Test.testName = ""
-request_header = {"headers": "GET / HTTP/1.1\r\n\r\n", "timestamp": "1469733493.993", "body": ""}
+request_header = {"headers": "GET / HTTP/1.1\r\n\r\n",
+                  "timestamp": "1469733493.993", "body": ""}
 # expected response from the origin server
-response_header = {"headers": "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n", "timestamp": "1469733493.993", "body": ""}
+response_header = {"headers": "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n",
+                   "timestamp": "1469733493.993", "body": ""}
 
-Test.PreparePlugin(os.path.join(Test.Variables.AtsTestToolsDir, 'plugins', 'continuations_verify.cc'), ts)
+Test.PreparePlugin(os.path.join(Test.Variables.AtsTestToolsDir,
+                                'plugins', 'ssntxnorder_verify.cc'), ts)
 
 # add response to the server dictionary
 server.addResponse("sessionfile.log", request_header, response_header)
 ts.Disk.records_config.update({
     'proxy.config.diags.debug.enabled': 1,
-    'proxy.config.diags.debug.tags': 'continuations_verify.*',
-    'proxy.config.http.cache.http' : 0, #disable cache to simply the test.
-    'proxy.config.cache.enable_read_while_writer' : 0
+    'proxy.config.diags.debug.tags': 'ssntxnorder_verify.*',
+    'proxy.config.http.cache.http': 0,  # disable cache to simply the test.
+    'proxy.config.cache.enable_read_while_writer': 0
 })
+
 ts.Disk.remap_config.AddLine(
-    'map http://127.0.0.1:{0} http://127.0.0.1:{1}'.format(ts.Variables.port, server.Variables.Port)
+    'map http://127.0.0.1:{0} http://127.0.0.1:{1}'.format(
+        ts.Variables.port, server.Variables.Port)
 )
 
 cmdstr = 'curl -k -vs http://127.0.0.1:{0}'.format(ts.Variables.port)
@@ -55,66 +60,74 @@ numberOfRequests = 3
 tr = Test.AddTestRun()
 tr.Processes.Default.Command = 'sleep 10' # ensure stats updated
 tr.Processes.Default.ReturnCode = 0
-tr.Processes.Default.StartBefore(server, ready=When.PortOpen(server.Variables.Port))
+# time delay as proxy.config.http.wait_for_cache could be broken
+tr.Processes.Default.StartBefore(
+    server, ready=When.PortOpen(server.Variables.Port))
 tr.Processes.Default.StartBefore(ts, ready=When.PortOpen(ts.Variables.port))
 tr.Processes.Default.StartAfter( 
-    *Test.ParallelizeCommand(tr, numberOfRequests, cmdstr)
+    *Test.ParallelizeCommand(tr, numberOfRequests, cmdstr) 
     )
 tr.StillRunningAfter = ts
 
+# Watch the records snapshot file.
+records = ts.Disk.File(os.path.join(ts.Variables.RUNTIMEDIR, "records.snap"))
+
+
+# Check our work on traffic_ctl
+# no errors happened,
+tr = Test.AddTestRun()
+tr.DelayStart = 10
+tr.Processes.Default.Command = 'traffic_ctl metric get ssntxnorder_verify.err'
+tr.Processes.Default.ReturnCode = 0
+tr.Processes.Default.Env = ts.Env
+tr.Processes.Default.Streams.All = Testers.ContainsExpression(
+    'ssntxnorder_verify.err 0', 'incorrect statistic return, or possible error.')
+tr.StillRunningAfter = ts
+tr.StillRunningAfter = server
+
 comparator_command = '''
-if test "`traffic_ctl metric get continuations_verify.{0}.close.1 | cut -d ' ' -f 2`" -eq "`traffic_ctl metric get continuations_verify.{0}.close.2 | cut -d ' ' -f 2`" ; then\
+if test "`traffic_ctl metric get ssntxnorder_verify.{0}.start | cut -d ' ' -f 2`" -eq "`traffic_ctl metric get ssntxnorder_verify.{0}.close | cut -d ' ' -f 2`" ; then\
      echo yes;\
     else \
     echo no; \
     fi;
     '''
 
-records = ts.Disk.File(os.path.join(ts.Variables.RUNTIMEDIR, "records.snap"))
-
 # number of sessions/transactions opened and closed are equal
 tr = Test.AddTestRun()
-tr.DelayStart=10 
 tr.Processes.Default.Command = comparator_command.format('ssn')
 tr.Processes.Default.ReturnCode = 0
 tr.Processes.Default.Env = ts.Env
-tr.Processes.Default.Streams.stdout = Testers.ContainsExpression("yes", 'should verify contents')
+tr.Processes.Default.Streams.stdout = Testers.ContainsExpression(
+    "yes", 'should verify contents')
 tr.StillRunningAfter = ts
-# for debugging session number
-ssn1 = tr.Processes.Process("session1", 'traffic_ctl metric get continuations_verify.ssn.close.1 > ssn1')
-ssn2 = tr.Processes.Process("session2", 'traffic_ctl metric get continuations_verify.ssn.close.2 > ssn2')
-ssn1.Env = ts.Env
-ssn2.Env = ts.Env
-tr.Processes.Default.StartBefore(ssn1)
-tr.Processes.Default.StartBefore(ssn2)
+tr.StillRunningAfter = server
 
 tr = Test.AddTestRun()
 tr.Processes.Default.Command = comparator_command.format('txn')
 tr.Processes.Default.ReturnCode = 0
 tr.Processes.Default.Env = ts.Env
-tr.Processes.Default.Streams.stdout = Testers.ContainsExpression("yes", 'should verify contents')
+tr.Processes.Default.Streams.stdout = Testers.ContainsExpression(
+    "yes", 'should verify contents')
 tr.StillRunningAfter = ts
-# for debugging transaction number
-txn1 = tr.Processes.Process("transaction1", 'traffic_ctl metric get continuations_verify.txn.close.1 > txn1')
-txn2 = tr.Processes.Process("transaction2", 'traffic_ctl metric get continuations_verify.txn.close.2 > txn2')
-txn1.Env = ts.Env
-txn2.Env = ts.Env
-tr.Processes.Default.StartBefore(txn1)
-tr.Processes.Default.StartBefore(txn2)
+tr.StillRunningAfter = server
 
 # session count is positive,
 tr = Test.AddTestRun()
-tr.Processes.Default.Command = "traffic_ctl metric get continuations_verify.ssn.close.1"
+tr.Processes.Default.Command = "traffic_ctl metric get ssntxnorder_verify.ssn.start"
 tr.Processes.Default.ReturnCode = 0
 tr.Processes.Default.Env = ts.Env
-tr.Processes.Default.Streams.stdout = Testers.ExcludesExpression(" 0", 'should be nonzero')
+tr.Processes.Default.Streams.stdout = Testers.ExcludesExpression(
+    " 0", 'should be nonzero')
 tr.StillRunningAfter = ts
+tr.StillRunningAfter = server
 
 # and we receive the same number of transactions as we asked it to make
 tr = Test.AddTestRun()
-tr.Processes.Default.Command = "traffic_ctl metric get continuations_verify.txn.close.1"
+tr.Processes.Default.Command = "traffic_ctl metric get ssntxnorder_verify.txn.start"
 tr.Processes.Default.ReturnCode = 0
 tr.Processes.Default.Env = ts.Env
 tr.Processes.Default.Streams.stdout = Testers.ContainsExpression(
-    "continuations_verify.txn.close.1 {}".format(numberOfRequests), 'should be the number of transactions we made')
+    "ssntxnorder_verify.txn.start {}".format(numberOfRequests), 'should be the number of transactions we made')
 tr.StillRunningAfter = ts
+tr.StillRunningAfter = server
