@@ -327,6 +327,8 @@ HttpSM::init()
 
   SET_HANDLER(&HttpSM::main_handler);
 
+  adjust_event = false;
+
 #ifdef USE_HTTP_DEBUG_LISTS
   ink_mutex_acquire(&debug_sm_list_mutex);
   debug_sm_list.push(this);
@@ -1354,6 +1356,13 @@ HttpSM::state_api_callout(int event, void *data)
     milestone_update_api_time(milestones, api_timer);
   }
 
+  // Came back from a rescheduled event. If we changed handlers we previously entered from
+  // an async callout. Adjust the event code to persist the state from the original callout.
+  if (adjust_event && event != EVENT_INTERVAL){
+    event = adjusted_event_code;
+    adjust_event = false;
+  }
+   
   switch (event) {
   case EVENT_INTERVAL:
     ink_assert(pending_action == data);
@@ -1438,6 +1447,13 @@ plugins required to work with sni_routing.
 
           if (!plugin_lock) {
             api_timer = -Thread::get_hrtime_updated();
+            if (default_handler != &HttpSM::state_api_callout) {
+                // Entered from a function call from an internal api_callout. There's no way to reliably 
+                // ensure that we will have the same event code when the thread is rescheduled. We need 
+                // to adjust the event code for the aynsc callout.
+                adjust_event = true;
+                adjusted_event_code = event;
+            }
             HTTP_SM_SET_DEFAULT_HANDLER(&HttpSM::state_api_callout);
             ink_assert(pending_action == nullptr);
             pending_action = mutex->thread_holding->schedule_in(this, HRTIME_MSECONDS(10));

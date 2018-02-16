@@ -266,6 +266,10 @@ public:
   int state_api_callback(int event, void *data);
   int state_api_callout(int event, void *data);
 
+  // Allow override of the event code given to state_api_callout(int event, void *data)
+  bool adjust_event;
+  int  adjusted_event_code;
+
   // Used for Http Stat Pages
   HttpTunnel *
   get_tunnel()
