@@ -94,7 +94,7 @@ private:
   ConfigUpdateCbTable *cbtable;
   int max_msgs_in_a_row;
 
-  static const int MAX_MSGS_IN_A_ROW = 10000;
+  static const int MAX_MSGS_IN_A_ROW = 100;
   static void *processManagerThread(void *arg);
 };
 

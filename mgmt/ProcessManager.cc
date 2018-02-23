@@ -47,7 +47,7 @@ read_management_message(int sockfd, ink_hrtime timeout, MgmtMessageHdr **msg)
 
   *msg = nullptr;
 
-  switch (mgmt_read_timeout(sockfd, ink_hrtime_to_sec(timeout), 0 /* usec */)) {
+  switch (mgmt_read_timeout(sockfd, 0 , 100000 /* usec */)) {
   case 0:
     // Timed out.
     return 0;
@@ -172,7 +172,7 @@ ProcessManager::processManagerThread(void *arg)
       Alert("exiting with write error from process manager: %s", strerror(-ret));
     }
 
-    mgmt_sleep_sec(pmgmt->timeout);
+//    mgmt_sleep_sec(pmgmt->timeout);
   }
 
   return ret;
@@ -199,7 +199,7 @@ ProcessManager::~ProcessManager()
 void
 ProcessManager::reconfigure()
 {
-  max_msgs_in_a_row = MAX_MSGS_IN_A_ROW;
+  max_msgs_in_a_row = 100; //MAX_MSGS_IN_A_ROW;
 
   if (RecGetRecordInt("proxy.config.process_manager.timeout", &timeout) != REC_ERR_OKAY) {
     // Default to 5sec if the timeout is unspecified.
@@ -350,7 +350,7 @@ ProcessManager::pollLMConnection()
 
   for (count = 0; running && count < max_msgs_in_a_row; ++count) {
     MgmtMessageHdr *msg;
-    int ret = read_management_message(local_manager_sockfd, HRTIME_SECONDS(1), &msg);
+    int ret = read_management_message(local_manager_sockfd, HRTIME_SECONDS(3), &msg);
     if (ret < 0) {
       return ret;
     }

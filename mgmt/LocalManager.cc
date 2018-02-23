@@ -200,8 +200,8 @@ LocalManager::LocalManager(bool proxy_on) : BaseManager(), run_proxy(proxy_on)
   }
 #endif
 
-  process_server_timeout_secs  = REC_readInteger("proxy.config.lm.pserver_timeout_secs", &found);
-  process_server_timeout_msecs = REC_readInteger("proxy.config.lm.pserver_timeout_msecs", &found);
+  process_server_timeout_secs  = 0;//REC_readInteger("proxy.config.lm.pserver_timeout_secs", &found);
+  process_server_timeout_msecs = 100;//REC_readInteger("proxy.config.lm.pserver_timeout_msecs", &found);
   proxy_name                   = REC_readString("proxy.config.proxy_name", &found);
   proxy_binary                 = REC_readString("proxy.config.proxy_binary", &found);
   env_prep                     = REC_readString("proxy.config.env_prep", &found);
