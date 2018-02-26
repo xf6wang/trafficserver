@@ -53,7 +53,7 @@ In deciding between :class:`string_view` and :class:`TextView` remember that the
 cheaply cross convert. In general if the string is treated as a block of data, :class:`string_view`
 is better. If the contents of the string are to be examined / parsed non-uniformly then
 :class:`TextView` is better. For example, if the string is used simply as a key or a hash source,
-use :class:`string_view`. Or, if the string may contain substrings of interests such as key / value
+use :class:`string_view`. Or, if the string may contain sustrings of interests such as key / value
 pairs, then use a :class:`TextView`.
 
 :class:`TextView` provides a variety of methods for manipulating the view as a string. These are
