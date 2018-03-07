@@ -352,7 +352,7 @@ send_record_get_response(int fd, const RecRecord *rec)
     break; // skip it
   }
 
-  return send_mgmt_response(fd, OpType::RECORD_GET, &err, &rclass, &type, &name, &value);
+  return send_mgmt_message(MgmtMessageType::RESPONSE, fd, OpType::RECORD_GET, &err, &rclass, &type, &name, &value);
 }
 
 /**************************************************************************
@@ -381,7 +381,7 @@ handle_record_get(int fd, void *req, size_t reqlen)
 
   int fderr = fd; // [in,out] variable for the fd and error
 
-  ret = recv_mgmt_request(req, reqlen, OpType::RECORD_GET, &optype, &name);
+  ret = recv_mgmt_message(MgmtMessageType::REQUEST, req, reqlen, OpType::RECORD_GET, &optype, &name);
   if (ret != TS_ERR_OKAY) {
     return ret;
   }
@@ -432,7 +432,7 @@ handle_record_match(int fd, void *req, size_t reqlen)
   MgmtMarshallInt optype;
   MgmtMarshallString name;
 
-  ret = recv_mgmt_request(req, reqlen, OpType::RECORD_MATCH_GET, &optype, &name);
+  ret = recv_mgmt_message(MgmtMessageType::REQUEST, req, reqlen, OpType::RECORD_MATCH_GET, &optype, &name);
   if (ret != TS_ERR_OKAY) {
     return ret;
   }
@@ -476,7 +476,7 @@ handle_record_set(int fd, void *req, size_t reqlen)
   MgmtMarshallString name  = nullptr;
   MgmtMarshallString value = nullptr;
 
-  ret = recv_mgmt_request(req, reqlen, OpType::RECORD_SET, &optype, &name, &value);
+  ret = recv_mgmt_message(MgmtMessageType::REQUEST, req, reqlen, OpType::RECORD_SET, &optype, &name, &value);
   if (ret != TS_ERR_OKAY) {
     ret = TS_ERR_FAIL;
     goto fail;
@@ -496,7 +496,7 @@ fail:
 
   MgmtMarshallInt err = ret;
   MgmtMarshallInt act = action;
-  return send_mgmt_response(fd, OpType::RECORD_SET, &err, &act);
+  return send_mgmt_message(MgmtMessageType::RESPONSE, fd, OpType::RECORD_SET, &err, &act);
 }
 
 /**************************************************************************
@@ -513,12 +513,12 @@ handle_proxy_state_get(int fd, void *req, size_t reqlen)
   MgmtMarshallInt err;
   MgmtMarshallInt state = TS_PROXY_UNDEFINED;
 
-  err = recv_mgmt_request(req, reqlen, OpType::PROXY_STATE_GET, &optype);
+  err = recv_mgmt_message(MgmtMessageType::REQUEST, req, reqlen, OpType::PROXY_STATE_GET, &optype);
   if (err == TS_ERR_OKAY) {
     state = ProxyStateGet();
   }
 
-  return send_mgmt_response(fd, OpType::PROXY_STATE_GET, &err, &state);
+  return send_mgmt_message(MgmtMessageType::RESPONSE, fd, OpType::PROXY_STATE_GET, &err, &state);
 }
 
 /**************************************************************************
@@ -537,13 +537,13 @@ handle_proxy_state_set(int fd, void *req, size_t reqlen)
 
   MgmtMarshallInt err;
 
-  err = recv_mgmt_request(req, reqlen, OpType::PROXY_STATE_SET, &optype, &state, &clear);
+  err = recv_mgmt_message(MgmtMessageType::REQUEST, req, reqlen, OpType::PROXY_STATE_SET, &optype, &state, &clear);
   if (err != TS_ERR_OKAY) {
-    return send_mgmt_response(fd, OpType::PROXY_STATE_SET, &err);
+    return send_mgmt_message(MgmtMessageType::RESPONSE, fd, OpType::PROXY_STATE_SET, &err);
   }
 
   err = ProxyStateSet((TSProxyStateT)state, (TSCacheClearT)clear);
-  return send_mgmt_response(fd, OpType::PROXY_STATE_SET, &err);
+  return send_mgmt_message(MgmtMessageType::RESPONSE, fd, OpType::PROXY_STATE_SET, &err);
 }
 
 /**************************************************************************
@@ -559,12 +559,12 @@ handle_reconfigure(int fd, void *req, size_t reqlen)
   MgmtMarshallInt err;
   MgmtMarshallInt optype;
 
-  err = recv_mgmt_request(req, reqlen, OpType::RECONFIGURE, &optype);
+  err = recv_mgmt_message(MgmtMessageType::REQUEST, req, reqlen, OpType::RECONFIGURE, &optype);
   if (err == TS_ERR_OKAY) {
     err = Reconfigure();
   }
 
-  return send_mgmt_response(fd, OpType::RECONFIGURE, &err);
+  return send_mgmt_message(MgmtMessageType::RESPONSE, fd, OpType::RECONFIGURE, &err);
 }
 
 /**************************************************************************
@@ -581,7 +581,7 @@ handle_restart(int fd, void *req, size_t reqlen)
   MgmtMarshallInt options;
   MgmtMarshallInt err;
 
-  err = recv_mgmt_request(req, reqlen, OpType::RESTART, &optype, &options);
+  err = recv_mgmt_message(MgmtMessageType::REQUEST, req, reqlen, OpType::RESTART, &optype, &options);
   if (err == TS_ERR_OKAY) {
     switch (optype) {
     case OpType::BOUNCE:
@@ -596,7 +596,7 @@ handle_restart(int fd, void *req, size_t reqlen)
     }
   }
 
-  return send_mgmt_response(fd, OpType::RESTART, &err);
+  return send_mgmt_message(MgmtMessageType::RESPONSE, fd, OpType::RESTART, &err);
 }
 
 /**************************************************************************
@@ -613,13 +613,13 @@ handle_storage_device_cmd_offline(int fd, void *req, size_t reqlen)
   MgmtMarshallString name = nullptr;
   MgmtMarshallInt err;
 
-  err = recv_mgmt_request(req, reqlen, OpType::STORAGE_DEVICE_CMD_OFFLINE, &optype, &name);
+  err = recv_mgmt_message(MgmtMessageType::REQUEST, req, reqlen, OpType::STORAGE_DEVICE_CMD_OFFLINE, &optype, &name);
   if (err == TS_ERR_OKAY) {
     // forward to server
     lmgmt->signalEvent(MGMT_EVENT_STORAGE_DEVICE_CMD_OFFLINE, name);
   }
 
-  return send_mgmt_response(fd, OpType::STORAGE_DEVICE_CMD_OFFLINE, &err);
+  return send_mgmt_message(MgmtMessageType::RESPONSE, fd, OpType::STORAGE_DEVICE_CMD_OFFLINE, &err);
 }
 
 /**************************************************************************
@@ -636,13 +636,13 @@ handle_event_resolve(int fd, void *req, size_t reqlen)
   MgmtMarshallString name = nullptr;
   MgmtMarshallInt err;
 
-  err = recv_mgmt_request(req, reqlen, OpType::EVENT_RESOLVE, &optype, &name);
+  err = recv_mgmt_message(MgmtMessageType::REQUEST, req, reqlen, OpType::EVENT_RESOLVE, &optype, &name);
   if (err == TS_ERR_OKAY) {
     err = EventResolve(name);
   }
 
   ats_free(name);
-  return send_mgmt_response(fd, OpType::EVENT_RESOLVE, &err);
+  return send_mgmt_message(MgmtMessageType::RESPONSE, fd, OpType::EVENT_RESOLVE, &err);
 }
 
 /**************************************************************************
@@ -664,7 +664,7 @@ handle_event_get_mlt(int fd, void *req, size_t reqlen)
   MgmtMarshallInt err;
   MgmtMarshallString list = nullptr;
 
-  err = recv_mgmt_request(req, reqlen, OpType::EVENT_GET_MLT, &optype);
+  err = recv_mgmt_message(MgmtMessageType::REQUEST, req, reqlen, OpType::EVENT_GET_MLT, &optype);
   if (err != TS_ERR_OKAY) {
     goto done;
   }
@@ -692,7 +692,7 @@ handle_event_get_mlt(int fd, void *req, size_t reqlen)
 
 done:
   delete_queue(event_list);
-  return send_mgmt_response(fd, OpType::EVENT_GET_MLT, &err, &list);
+  return send_mgmt_message(MgmtMessageType::RESPONSE, fd, OpType::EVENT_GET_MLT, &err, &list);
 }
 
 /**************************************************************************
@@ -712,7 +712,7 @@ handle_event_active(int fd, void *req, size_t reqlen)
   MgmtMarshallInt err;
   MgmtMarshallInt bval = 0;
 
-  err = recv_mgmt_request(req, reqlen, OpType::EVENT_ACTIVE, &optype, &name);
+  err = recv_mgmt_message(MgmtMessageType::REQUEST, req, reqlen, OpType::EVENT_ACTIVE, &optype, &name);
   if (err != TS_ERR_OKAY) {
     goto done;
   }
@@ -729,7 +729,7 @@ handle_event_active(int fd, void *req, size_t reqlen)
 
 done:
   ats_free(name);
-  return send_mgmt_response(fd, OpType::EVENT_ACTIVE, &err, &bval);
+  return send_mgmt_message(MgmtMessageType::RESPONSE, fd, OpType::EVENT_ACTIVE, &err, &bval);
 }
 
 /**************************************************************************
@@ -745,13 +745,13 @@ handle_stats_reset(int fd, void *req, size_t reqlen)
   MgmtMarshallString name = nullptr;
   MgmtMarshallInt err;
 
-  err = recv_mgmt_request(req, reqlen, OpType::STATS_RESET_NODE, &optype, &name);
+  err = recv_mgmt_message(MgmtMessageType::REQUEST, req, reqlen, OpType::STATS_RESET_NODE, &optype, &name);
   if (err == TS_ERR_OKAY) {
     err = StatsReset(name);
   }
 
   ats_free(name);
-  return send_mgmt_response(fd, (OpType)optype, &err);
+  return send_mgmt_message(MgmtMessageType::RESPONSE, fd, (OpType)optype, &err);
 }
 
 /**************************************************************************
@@ -767,7 +767,7 @@ handle_api_ping(int /* fd */, void *req, size_t reqlen)
   MgmtMarshallInt optype;
   MgmtMarshallInt stamp;
 
-  return recv_mgmt_request(req, reqlen, OpType::API_PING, &optype, &stamp);
+  return recv_mgmt_message(MgmtMessageType::REQUEST, req, reqlen, OpType::API_PING, &optype, &stamp);
 }
 
 static TSMgmtError
@@ -778,12 +778,12 @@ handle_server_backtrace(int fd, void *req, size_t reqlen)
   MgmtMarshallString trace = nullptr;
   MgmtMarshallInt err;
 
-  err = recv_mgmt_request(req, reqlen, OpType::SERVER_BACKTRACE, &optype, &options);
+  err = recv_mgmt_message(MgmtMessageType::REQUEST, req, reqlen, OpType::SERVER_BACKTRACE, &optype, &options);
   if (err == TS_ERR_OKAY) {
     err = ServerBacktrace(options, &trace);
   }
 
-  err = send_mgmt_response(fd, OpType::SERVER_BACKTRACE, &err, &trace);
+  err = send_mgmt_message(MgmtMessageType::RESPONSE, fd, OpType::SERVER_BACKTRACE, &err, &trace);
   ats_free(trace);
 
   return (TSMgmtError)err;
@@ -863,7 +863,7 @@ send_record_describe(const RecRecord *rec, void *edata)
     }
   }
 
-  err = send_mgmt_response(match->fd, OpType::RECORD_DESCRIBE_CONFIG, &err, &rec_name, &rec_value, &rec_default, &rec_type,
+  err = send_mgmt_message(MgmtMessageType::RESPONSE, match->fd, OpType::RECORD_DESCRIBE_CONFIG, &err, &rec_name, &rec_value, &rec_default, &rec_type,
                            &rec_class, &rec_version, &rec_rsb, &rec_order, &rec_access, &rec_update, &rec_updatetype,
                            &rec_checktype, &rec_source, &rec_checkexpr);
 
@@ -880,7 +880,7 @@ handle_record_describe(int fd, void *req, size_t reqlen)
   MgmtMarshallInt options;
   MgmtMarshallString name;
 
-  ret = recv_mgmt_request(req, reqlen, OpType::RECORD_DESCRIBE_CONFIG, &optype, &name, &options);
+  ret = recv_mgmt_message(MgmtMessageType::REQUEST, req, reqlen, OpType::RECORD_DESCRIBE_CONFIG, &optype, &name, &options);
   if (ret != TS_ERR_OKAY) {
     return ret;
   }
@@ -934,12 +934,12 @@ handle_lifecycle_message(int fd, void *req, size_t reqlen)
   MgmtMarshallString tag;
   MgmtMarshallData data;
 
-  err = recv_mgmt_request(req, reqlen, OpType::LIFECYCLE_MESSAGE, &optype, &tag, &data);
+  err = recv_mgmt_message(MgmtMessageType::REQUEST, req, reqlen, OpType::LIFECYCLE_MESSAGE, &optype, &tag, &data);
   if (err == TS_ERR_OKAY) {
     lmgmt->signalEvent(MGMT_EVENT_LIFECYCLE_MESSAGE, static_cast<char *>(req), reqlen);
   }
 
-  return send_mgmt_response(fd, OpType::LIFECYCLE_MESSAGE, &err);
+  return send_mgmt_message(MgmtMessageType::RESPONSE, fd, OpType::LIFECYCLE_MESSAGE, &err);
 }
 /**************************************************************************/
 
@@ -997,7 +997,7 @@ handle_control_message(int fd, void *req, size_t reqlen)
     if (handlers[static_cast<unsigned>(optype)].flags & MGMT_API_PRIVILEGED) {
       if (mgmt_get_peereid(fd, &euid, &egid) == -1 || (euid != 0 && euid != geteuid())) {
         Debug("ts_main", "denied privileged API access on fd=%d for uid=%d gid=%d", fd, euid, egid);
-        return send_mgmt_error(fd, optype, TS_ERR_PERMISSION_DENIED);
+        return send_mgmt_message(MgmtMessageType::ERROR, fd, optype, TS_ERR_PERMISSION_DENIED);
       }
     }
   }
@@ -1009,7 +1009,7 @@ handle_control_message(int fd, void *req, size_t reqlen)
     // NOTE: if the error was produced by the handler sending a response, this could attempt to
     // send a response again. However, this would only happen if sending the response failed, so
     // it is safe to fail to send it again here ...
-    return send_mgmt_error(fd, optype, error);
+    return send_mgmt_message(MgmtMessageType::ERROR, fd, optype, error);
   }
 
   return TS_ERR_OKAY;

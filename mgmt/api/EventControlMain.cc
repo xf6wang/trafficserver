@@ -389,7 +389,7 @@ event_callback_main(void *arg)
           MgmtMarshallString name = event->name;
           MgmtMarshallString desc = event->description;
 
-          ret = send_mgmt_request(client_entry->fd, OpType::EVENT_NOTIFY, &optype, &name, &desc);
+          ret = send_mgmt_message(MgmtMessageType::REQUEST, client_entry->fd, OpType::EVENT_NOTIFY, &optype, &name, &desc);
           if (ret != TS_ERR_OKAY) {
             Debug("event", "sending even notification to fd [%d] failed.", client_entry->fd);
           }
@@ -446,7 +446,7 @@ handle_event_reg_callback(EventClientT *client, void *req, size_t reqlen)
   MgmtMarshallString name = nullptr;
   TSMgmtError ret;
 
-  ret = recv_mgmt_request(req, reqlen, OpType::EVENT_REG_CALLBACK, &optype, &name);
+  ret = recv_mgmt_message(MgmtMessageType::REQUEST, req, reqlen, OpType::EVENT_REG_CALLBACK, &optype, &name);
   if (ret != TS_ERR_OKAY) {
     goto done;
   }
@@ -489,7 +489,7 @@ handle_event_unreg_callback(EventClientT *client, void *req, size_t reqlen)
   MgmtMarshallString name = nullptr;
   TSMgmtError ret;
 
-  ret = recv_mgmt_request(req, reqlen, OpType::EVENT_UNREG_CALLBACK, &optype, &name);
+  ret = recv_mgmt_message(MgmtMessageType::REQUEST, req, reqlen, OpType::EVENT_UNREG_CALLBACK, &optype, &name);
   if (ret != TS_ERR_OKAY) {
     goto done;
   }

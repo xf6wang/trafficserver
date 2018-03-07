@@ -31,6 +31,13 @@
 
 #define MAX_CONN_TRIES 10 // maximum number of attemps to reconnect to TM
 
+// what kind of message to send/recieve
+enum MgmtMessageType {
+  REQUEST,
+  RESPONSE,
+  ERROR
+};
+
 // the possible operations or msg types sent from remote client to TM
 enum class OpType : MgmtMarshallInt {
   RECORD_SET,
@@ -70,19 +77,19 @@ struct mgmt_message_sender {
 
 // Marshall and send a request, prefixing the message length as a MGMT_MARSHALL_INT.
 TSMgmtError send_mgmt_request(const mgmt_message_sender &snd, OpType optype, ...);
-TSMgmtError send_mgmt_request(int fd, OpType optype, ...);
+TSMgmtError send_mgmt_message(MgmtMessageType msgtype, int fd, OpType optype, ...);
 
 // Marshall and send an error respose for this operation type.
-TSMgmtError send_mgmt_error(int fd, OpType op, TSMgmtError error);
+//TSMgmtError send_mgmt_error(int fd, OpType op, TSMgmtError error);
 
 // Parse a request message from a buffer.
-TSMgmtError recv_mgmt_request(void *buf, size_t buflen, OpType optype, ...);
+TSMgmtError recv_mgmt_message(MgmtMessageType msgtype, void *buf, size_t buflen, OpType optype, ...);
 
 // Marshall and send a response, prefixing the message length as a MGMT_MARSHALL_INT.
-TSMgmtError send_mgmt_response(int fd, OpType optype, ...);
+//TSMgmtError send_mgmt_response(int fd, OpType optype, ...);
 
 // Parse a response message from a buffer.
-TSMgmtError recv_mgmt_response(void *buf, size_t buflen, OpType optype, ...);
+//TSMgmtError recv_mgmt_response(void *buf, size_t buflen, OpType optype, ...);
 
 // Pull a management message (either request or response) off the wire.
 TSMgmtError recv_mgmt_message(int fd, MgmtMarshallData &msg);
