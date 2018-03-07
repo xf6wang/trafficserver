@@ -166,7 +166,6 @@ ProcessManager::processManagerThread(void *arg)
       }
     }
 
-    pmgmt->processEventQueue();
     ret = pmgmt->processSignalQueue();
     if (ret < 0 && pmgmt->running) {
       Alert("exiting with write error from process manager: %s", strerror(-ret));
@@ -240,33 +239,6 @@ ProcessManager::signalManager(int msg_id, const char *data_raw, int data_len)
   memcpy((char *)mh + sizeof(MgmtMessageHdr), data_raw, data_len);
 
   ink_release_assert(enqueue(mgmt_signal_queue, mh));
-}
-
-bool
-ProcessManager::processEventQueue()
-{
-  bool ret = false;
-
-  while (!queue_is_empty(mgmt_event_queue)) {
-    MgmtMessageHdr *mh = (MgmtMessageHdr *)dequeue(mgmt_event_queue);
-
-    Debug("pmgmt", "processing event id '%d' payload=%d", mh->msg_id, mh->data_len);
-    if (mh->data_len > 0) {
-      executeMgmtCallback(mh->msg_id, (char *)mh + sizeof(MgmtMessageHdr), mh->data_len);
-    } else {
-      executeMgmtCallback(mh->msg_id, nullptr, 0);
-    }
-
-    // A shutdown message is a normal exit, so Alert rather than Fatal.
-    if (mh->msg_id == MGMT_EVENT_SHUTDOWN) {
-      Alert("exiting on shutdown message");
-    }
-
-    ats_free(mh);
-    ret = true;
-  }
-
-  return ret;
 }
 
 int
@@ -362,7 +334,6 @@ ProcessManager::pollLMConnection()
 
     Debug("pmgmt", "received message ID %d", msg->msg_id);
     handleMgmtMsgFromLM(msg);
-    ats_free(msg);
   }
 
   Debug("pmgmt", "enqueued %d of max %d messages in a row", count, max_msgs_in_a_row);
@@ -372,20 +343,24 @@ ProcessManager::pollLMConnection()
 void
 ProcessManager::handleMgmtMsgFromLM(MgmtMessageHdr *mh)
 {
+  ink_assert(mh != nullptr);
+
   char *data_raw = (char *)mh + sizeof(MgmtMessageHdr);
 
+  Debug("pmgmt", "processing event id '%d' payload=%d", mh->msg_id, mh->data_len);
   switch (mh->msg_id) {
   case MGMT_EVENT_SHUTDOWN:
-    signalMgmtEntity(MGMT_EVENT_SHUTDOWN);
+    executeMgmtCallback(MGMT_EVENT_SHUTDOWN, nullptr, 0);
+    Alert("exiting on shutdown message");
     break;
   case MGMT_EVENT_RESTART:
-    signalMgmtEntity(MGMT_EVENT_RESTART);
+    executeMgmtCallback(MGMT_EVENT_RESTART, nullptr, 0);
     break;
   case MGMT_EVENT_CLEAR_STATS:
-    signalMgmtEntity(MGMT_EVENT_CLEAR_STATS);
+    executeMgmtCallback(MGMT_EVENT_CLEAR_STATS, nullptr, 0);
     break;
   case MGMT_EVENT_ROLL_LOG_FILES:
-    signalMgmtEntity(MGMT_EVENT_ROLL_LOG_FILES);
+    executeMgmtCallback(MGMT_EVENT_ROLL_LOG_FILES, nullptr, 0);
     break;
   case MGMT_EVENT_PLUGIN_CONFIG_UPDATE:
     if (data_raw != nullptr && data_raw[0] != '\0' && this->cbtable) {
@@ -410,16 +385,18 @@ ProcessManager::handleMgmtMsgFromLM(MgmtMessageHdr *mh)
     */
     break;
   case MGMT_EVENT_LIBRECORDS:
-    signalMgmtEntity(MGMT_EVENT_LIBRECORDS, data_raw, mh->data_len);
+    executeMgmtCallback(MGMT_EVENT_LIBRECORDS, data_raw, mh->data_len);
     break;
   case MGMT_EVENT_STORAGE_DEVICE_CMD_OFFLINE:
-    signalMgmtEntity(MGMT_EVENT_STORAGE_DEVICE_CMD_OFFLINE, data_raw, mh->data_len);
+    executeMgmtCallback(MGMT_EVENT_STORAGE_DEVICE_CMD_OFFLINE, data_raw, mh->data_len);
     break;
   case MGMT_EVENT_LIFECYCLE_MESSAGE:
-    signalMgmtEntity(MGMT_EVENT_LIFECYCLE_MESSAGE, data_raw, mh->data_len);
+    executeMgmtCallback(MGMT_EVENT_LIFECYCLE_MESSAGE, data_raw, mh->data_len);
     break;
   default:
     Warning("received unknown message ID %d\n", mh->msg_id);
     break;
   }
+
+  ats_free(mh);
 }
