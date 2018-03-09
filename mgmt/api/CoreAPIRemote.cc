@@ -568,8 +568,9 @@ mgmt_record_describe_reply(TSConfigRecordDescription *val)
   MgmtMarshallInt checktype;
   MgmtMarshallInt source;
 
-  ret = recv_mgmt_message(MgmtMessageType::RESPONSE, reply.ptr, reply.len, OpType::RECORD_DESCRIBE_CONFIG, &err, &name, &value, &deflt, &rtype, &rclass,
-                           &version, &rsb, &order, &access, &update, &updatetype, &checktype, &source, &expr);
+  ret =
+    recv_mgmt_message(MgmtMessageType::RESPONSE, reply.ptr, reply.len, OpType::RECORD_DESCRIBE_CONFIG, &err, &name, &value, &deflt,
+                      &rtype, &rclass, &version, &rsb, &order, &access, &update, &updatetype, &checktype, &source, &expr);
 
   ats_free(reply.ptr);
 

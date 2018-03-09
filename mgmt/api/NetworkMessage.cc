@@ -55,117 +55,83 @@ static TSMgmtError err_record_desc_config_handler(int fd, OpType optype, MgmtMar
  NetOpertation Structure
  { request,       // Requests always begin with a OpType, followed by aditional fields.
    response,      // Responses always begin with a TSMgmtError code, followed by additional fields.
-   error handler  // 
+   error handler  //
  }
 */
 
-static const struct NetCmd NetOperations [] = {
-  /* RECORD_SET                 */  { {3, {MGMT_MARSHALL_INT, MGMT_MARSHALL_STRING, MGMT_MARSHALL_STRING}},
-                                      {2, {MGMT_MARSHALL_INT, MGMT_MARSHALL_INT}},
-                                      err_intval_handler 
-                                    },
-  /* RECORD_GET                 */  { {2, {MGMT_MARSHALL_INT, MGMT_MARSHALL_STRING}},
-                                      {5, {MGMT_MARSHALL_INT, MGMT_MARSHALL_INT, MGMT_MARSHALL_INT, MGMT_MARSHALL_STRING, MGMT_MARSHALL_DATA}}, 
-                                      err_multival_handler
-                                    },
-  /* PROXY_STATE_GET            */  { {1, {MGMT_MARSHALL_INT}},
-                                      {2, {MGMT_MARSHALL_INT, MGMT_MARSHALL_INT}},
-                                      err_intval_handler
-                                    },       
-  /* PROXY_STATE_SET            */  { {3, {MGMT_MARSHALL_INT, MGMT_MARSHALL_INT, MGMT_MARSHALL_INT}},
-                                      {1, {MGMT_MARSHALL_INT}},
-                                      err_ecode_handler
-                                    },
-  /* RECONFIGURE                */  { {1, {MGMT_MARSHALL_INT}},
-                                      {1, {MGMT_MARSHALL_INT}},
-                                      err_ecode_handler
-                                    },                                                                                                                           
-  /* RESTART                    */  { {2, {MGMT_MARSHALL_INT, MGMT_MARSHALL_INT}},
-                                      {1, {MGMT_MARSHALL_INT}},
-                                      err_ecode_handler
-                                    },
-  /* BOUNCE                     */  { {2, {MGMT_MARSHALL_INT, MGMT_MARSHALL_INT}},
-                                      {1, {MGMT_MARSHALL_INT}},
-                                      err_ecode_handler
-                                    },
-  /* EVENT_RESOLVE              */  { {2, {MGMT_MARSHALL_INT, MGMT_MARSHALL_STRING}},
-                                      {1, {MGMT_MARSHALL_INT}},
-                                      err_ecode_handler
-                                    },
- /* EVENT_GET_MLT              */   { {1, {MGMT_MARSHALL_INT}},
-                                      {2, {MGMT_MARSHALL_INT, MGMT_MARSHALL_STRING}},
-                                      err_strval_handler
-                                    },
- /* EVENT_ACTIVE               */   { {2, {MGMT_MARSHALL_INT, MGMT_MARSHALL_STRING}},
-                                      {2, {MGMT_MARSHALL_INT, MGMT_MARSHALL_INT}},
-                                      err_intval_handler
-                                    },
- /* EVENT_REG_CALLBACK         */   { {2, {MGMT_MARSHALL_INT, MGMT_MARSHALL_STRING}},
-                                      {0, {}}, // no reply
-                                      err_ts_ok_handler
-                                    },                         
-  /* EVENT_UNREG_CALLBACK       */  { {2, {MGMT_MARSHALL_INT, MGMT_MARSHALL_STRING}},
-                                      {0, {}}, // no reply
-                                      err_ts_ok_handler
-                                    },
-  /* EVENT_NOTIFY               */  { {3, {MGMT_MARSHALL_INT, MGMT_MARSHALL_STRING, MGMT_MARSHALL_STRING}}, // only msg sent from TM to client
-                                      {0, {}}, // no reply
-                                      err_ts_ok_handler
-                                    },              
-  /* STATS_RESET_NODE           */  { {2, {MGMT_MARSHALL_INT, MGMT_MARSHALL_STRING}},
-                                      {1, {MGMT_MARSHALL_INT}},
-                                      err_ecode_handler
-                                    },   
-  /* STORAGE_DEVICE_CMD_OFFLINE */  { {2, {MGMT_MARSHALL_INT, MGMT_MARSHALL_STRING}},
-                                      {1, {MGMT_MARSHALL_INT}},
-                                      err_ecode_handler                              
-                                    },
-  /* RECORD_MATCH_GET           */  { {2, {MGMT_MARSHALL_INT, MGMT_MARSHALL_STRING}},
-                                      {5, {MGMT_MARSHALL_INT, MGMT_MARSHALL_INT, MGMT_MARSHALL_INT, MGMT_MARSHALL_STRING, MGMT_MARSHALL_DATA}},
-                                      err_multival_handler
-                                    },
-  /* API_PING                   */  { {2, {MGMT_MARSHALL_INT, MGMT_MARSHALL_INT}},
-                                      {0, {}}, // no reply
-                                      err_ts_ok_handler
-                                    },         
-  /* SERVER_BACKTRACE           */  { {2, {MGMT_MARSHALL_INT, MGMT_MARSHALL_INT}},
-                                      {2, {MGMT_MARSHALL_INT, MGMT_MARSHALL_STRING}},
-                                      err_strval_handler
-                                    },
-  /* RECORD_DESCRIBE_CONFIG     */  { {3, {MGMT_MARSHALL_INT, MGMT_MARSHALL_STRING, MGMT_MARSHALL_INT}},
-                                      {15,
-                                        {MGMT_MARSHALL_INT /* status */, MGMT_MARSHALL_STRING /* name */, MGMT_MARSHALL_DATA /* value */,
-                                          MGMT_MARSHALL_DATA /* default */, MGMT_MARSHALL_INT /* type */, MGMT_MARSHALL_INT /* class */, MGMT_MARSHALL_INT /* version */,
-                                          MGMT_MARSHALL_INT /* rsb */, MGMT_MARSHALL_INT /* order */, MGMT_MARSHALL_INT /* access */, MGMT_MARSHALL_INT /* update */,
-                                          MGMT_MARSHALL_INT /* updatetype */, MGMT_MARSHALL_INT /* checktype */, MGMT_MARSHALL_INT /* source */,
-                                          MGMT_MARSHALL_STRING /* checkexpr */}},
-                                      err_record_desc_config_handler
-                                    },
-  /* LIFECYCLE_MESSAGE          */  { {3, {MGMT_MARSHALL_INT, MGMT_MARSHALL_STRING, MGMT_MARSHALL_DATA}},
-                                      {1, {MGMT_MARSHALL_INT}},
-                                      err_ecode_handler
-                                    }                                                                                                                                                                                                  
-};
+static const struct NetCmd NetOperations[] = {
+  /* RECORD_SET                 */ {{3, {MGMT_MARSHALL_INT, MGMT_MARSHALL_STRING, MGMT_MARSHALL_STRING}},
+                                    {2, {MGMT_MARSHALL_INT, MGMT_MARSHALL_INT}},
+                                    err_intval_handler},
+  /* RECORD_GET                 */
+  {{2, {MGMT_MARSHALL_INT, MGMT_MARSHALL_STRING}},
+   {5, {MGMT_MARSHALL_INT, MGMT_MARSHALL_INT, MGMT_MARSHALL_INT, MGMT_MARSHALL_STRING, MGMT_MARSHALL_DATA}},
+   err_multival_handler},
+  /* PROXY_STATE_GET            */ {{1, {MGMT_MARSHALL_INT}}, {2, {MGMT_MARSHALL_INT, MGMT_MARSHALL_INT}}, err_intval_handler},
+  /* PROXY_STATE_SET            */
+  {{3, {MGMT_MARSHALL_INT, MGMT_MARSHALL_INT, MGMT_MARSHALL_INT}}, {1, {MGMT_MARSHALL_INT}}, err_ecode_handler},
+  /* RECONFIGURE                */ {{1, {MGMT_MARSHALL_INT}}, {1, {MGMT_MARSHALL_INT}}, err_ecode_handler},
+  /* RESTART                    */ {{2, {MGMT_MARSHALL_INT, MGMT_MARSHALL_INT}}, {1, {MGMT_MARSHALL_INT}}, err_ecode_handler},
+  /* BOUNCE                     */ {{2, {MGMT_MARSHALL_INT, MGMT_MARSHALL_INT}}, {1, {MGMT_MARSHALL_INT}}, err_ecode_handler},
+  /* EVENT_RESOLVE              */ {{2, {MGMT_MARSHALL_INT, MGMT_MARSHALL_STRING}}, {1, {MGMT_MARSHALL_INT}}, err_ecode_handler},
+  /* EVENT_GET_MLT              */ {{1, {MGMT_MARSHALL_INT}}, {2, {MGMT_MARSHALL_INT, MGMT_MARSHALL_STRING}}, err_strval_handler},
+  /* EVENT_ACTIVE               */
+  {{2, {MGMT_MARSHALL_INT, MGMT_MARSHALL_STRING}}, {2, {MGMT_MARSHALL_INT, MGMT_MARSHALL_INT}}, err_intval_handler},
+  /* EVENT_REG_CALLBACK         */
+  {{2, {MGMT_MARSHALL_INT, MGMT_MARSHALL_STRING}},
+   {0, {}}, // no reply
+   err_ts_ok_handler},
+  /* EVENT_UNREG_CALLBACK       */
+  {{2, {MGMT_MARSHALL_INT, MGMT_MARSHALL_STRING}},
+   {0, {}}, // no reply
+   err_ts_ok_handler},
+  /* EVENT_NOTIFY               */
+  {{3, {MGMT_MARSHALL_INT, MGMT_MARSHALL_STRING, MGMT_MARSHALL_STRING}}, // only msg sent from TM to client
+   {0, {}},                                                              // no reply
+   err_ts_ok_handler},
+  /* STATS_RESET_NODE           */ {{2, {MGMT_MARSHALL_INT, MGMT_MARSHALL_STRING}}, {1, {MGMT_MARSHALL_INT}}, err_ecode_handler},
+  /* STORAGE_DEVICE_CMD_OFFLINE */ {{2, {MGMT_MARSHALL_INT, MGMT_MARSHALL_STRING}}, {1, {MGMT_MARSHALL_INT}}, err_ecode_handler},
+  /* RECORD_MATCH_GET           */
+  {{2, {MGMT_MARSHALL_INT, MGMT_MARSHALL_STRING}},
+   {5, {MGMT_MARSHALL_INT, MGMT_MARSHALL_INT, MGMT_MARSHALL_INT, MGMT_MARSHALL_STRING, MGMT_MARSHALL_DATA}},
+   err_multival_handler},
+  /* API_PING                   */
+  {{2, {MGMT_MARSHALL_INT, MGMT_MARSHALL_INT}},
+   {0, {}}, // no reply
+   err_ts_ok_handler},
+  /* SERVER_BACKTRACE           */
+  {{2, {MGMT_MARSHALL_INT, MGMT_MARSHALL_INT}}, {2, {MGMT_MARSHALL_INT, MGMT_MARSHALL_STRING}}, err_strval_handler},
+  /* RECORD_DESCRIBE_CONFIG     */
+  {{3, {MGMT_MARSHALL_INT, MGMT_MARSHALL_STRING, MGMT_MARSHALL_INT}},
+   {15,
+    {MGMT_MARSHALL_INT /* status */, MGMT_MARSHALL_STRING /* name */, MGMT_MARSHALL_DATA /* value */,
+     MGMT_MARSHALL_DATA /* default */, MGMT_MARSHALL_INT /* type */, MGMT_MARSHALL_INT /* class */, MGMT_MARSHALL_INT /* version */,
+     MGMT_MARSHALL_INT /* rsb */, MGMT_MARSHALL_INT /* order */, MGMT_MARSHALL_INT /* access */, MGMT_MARSHALL_INT /* update */,
+     MGMT_MARSHALL_INT /* updatetype */, MGMT_MARSHALL_INT /* checktype */, MGMT_MARSHALL_INT /* source */,
+     MGMT_MARSHALL_STRING /* checkexpr */}},
+   err_record_desc_config_handler},
+  /* LIFECYCLE_MESSAGE          */
+  {{3, {MGMT_MARSHALL_INT, MGMT_MARSHALL_STRING, MGMT_MARSHALL_DATA}}, {1, {MGMT_MARSHALL_INT}}, err_ecode_handler}};
 
-#define GETCMD(ops, optype, cmd)                           \
-  do {                                                     \
-    if (static_cast<unsigned>(optype) >= countof(ops)) {   \
-      return TS_ERR_PARAMS;                                \
-    }                                                      \
-    cmd = &ops[static_cast<unsigned>(optype)];             \
+#define GETCMD(ops, optype, cmd)                         \
+  do {                                                   \
+    if (static_cast<unsigned>(optype) >= countof(ops)) { \
+      return TS_ERR_PARAMS;                              \
+    }                                                    \
+    cmd = &ops[static_cast<unsigned>(optype)];           \
   } while (0);
 
 TSMgmtError
 send_mgmt_error(int fd, OpType optype, TSMgmtError error)
 {
-  if(optype == OpType::UNDEFINED_OP) { // have to handle seperately because we don't know know the field length
+  if (optype == OpType::UNDEFINED_OP) { // have to handle seperately because we don't know know the field length
     return TS_ERR_OKAY;
   }
   const NetCmd *cmd;
   GETCMD(NetOperations, optype, cmd);
 
-  const std::function<TSMgmtError(int, OpType, int)>* handler = &(cmd->err_handler);
-  return (*handler)(fd, optype, error); 
+  const std::function<TSMgmtError(int, OpType, int)> *handler = &(cmd->err_handler);
+  return (*handler)(fd, optype, error);
 }
 
 TSMgmtError
@@ -180,7 +146,7 @@ send_mgmt_message(MgmtMessageType msgtype, int fd, OpType optype, ...)
 
   GETCMD(NetOperations, optype, cmd);
 
-  switch(msgtype){
+  switch (msgtype) {
   case MgmtMessageType::REQUEST:
     operation = &(cmd->request);
     break;
@@ -266,10 +232,10 @@ recv_x(MgmtMessageType msgtype, void *buf, size_t buflen, OpType optype, va_list
   ssize_t msglen;
   const NetCmd *cmd;
   const NetCmdOperation *operation = nullptr;
-  
+
   GETCMD(NetOperations, optype, cmd);
 
-  switch(msgtype){
+  switch (msgtype) {
   case REQUEST:
     operation = &(cmd->request);
     break;
@@ -281,19 +247,19 @@ recv_x(MgmtMessageType msgtype, void *buf, size_t buflen, OpType optype, va_list
     ink_fatal("invalid message type. %d", static_cast<int>(msgtype));
     return TS_ERR_PARAMS;
   }
-  
+
   ink_assert(operation != nullptr);
 
   msglen = mgmt_message_parse_v(buf, buflen, operation->fields, operation->nfields, ap);
   return (msglen == -1) ? TS_ERR_PARAMS : TS_ERR_OKAY;
 }
 
-TSMgmtError 
+TSMgmtError
 recv_mgmt_message(MgmtMessageType msgtype, void *buf, size_t buflen, OpType optype, ...)
 {
   TSMgmtError err;
   va_list ap;
- 
+
   va_start(ap, optype);
   err = recv_x(msgtype, buf, buflen, optype, ap);
   va_end(ap);
@@ -328,34 +294,44 @@ extract_mgmt_request_optype(void *msg, size_t msglen)
 
 //------------- DEFINE HANDLER FUNCTIONS ------------------
 
-static TSMgmtError err_ts_ok_handler(int fd, OpType optype, MgmtMarshallInt ecode) {
+static TSMgmtError
+err_ts_ok_handler(int fd, OpType optype, MgmtMarshallInt ecode)
+{
   return TS_ERR_OKAY;
 }
-static TSMgmtError err_ecode_handler(int fd, OpType optype, MgmtMarshallInt ecode) {
+static TSMgmtError
+err_ecode_handler(int fd, OpType optype, MgmtMarshallInt ecode)
+{
   return send_mgmt_message(RESPONSE, fd, optype, &ecode);
 }
-static TSMgmtError err_intval_handler(int fd, OpType optype, MgmtMarshallInt ecode) {
-  MgmtMarshallInt intval    = 0;
+static TSMgmtError
+err_intval_handler(int fd, OpType optype, MgmtMarshallInt ecode)
+{
+  MgmtMarshallInt intval = 0;
   return send_mgmt_message(RESPONSE, fd, optype, &ecode, &intval);
 }
-static TSMgmtError err_strval_handler(int fd, OpType optype, MgmtMarshallInt ecode) {
+static TSMgmtError
+err_strval_handler(int fd, OpType optype, MgmtMarshallInt ecode)
+{
   MgmtMarshallString strval = nullptr;
   return send_mgmt_message(RESPONSE, fd, optype, &ecode, &strval);
 }
-static TSMgmtError err_multival_handler(int fd, OpType optype, MgmtMarshallInt ecode) {
+static TSMgmtError
+err_multival_handler(int fd, OpType optype, MgmtMarshallInt ecode)
+{
   MgmtMarshallInt intval    = 0;
   MgmtMarshallData dataval  = {nullptr, 0};
   MgmtMarshallString strval = nullptr;
   return send_mgmt_message(RESPONSE, fd, optype, &ecode, &intval, &intval, &strval, &dataval);
 }
-static TSMgmtError err_record_desc_config_handler(int fd, OpType optype, MgmtMarshallInt ecode) {
+static TSMgmtError
+err_record_desc_config_handler(int fd, OpType optype, MgmtMarshallInt ecode)
+{
   MgmtMarshallInt intval    = 0;
   MgmtMarshallData dataval  = {nullptr, 0};
   MgmtMarshallString strval = nullptr;
   return send_mgmt_message(RESPONSE, fd, optype, &ecode, &strval /* name */, &dataval /* value */, &dataval /* default */,
-                                            &intval /* type */, &intval /* class */, &intval /* version */, &intval /* rsb */,
-                                            &intval /* order */, &intval /* access */, &intval /* update */, &intval /* updatetype */,
-                                            &intval /* checktype */, &intval /* source */, &strval /* checkexpr */);
+                           &intval /* type */, &intval /* class */, &intval /* version */, &intval /* rsb */, &intval /* order */,
+                           &intval /* access */, &intval /* update */, &intval /* updatetype */, &intval /* checktype */,
+                           &intval /* source */, &strval /* checkexpr */);
 }
-
-

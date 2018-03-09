@@ -863,9 +863,9 @@ send_record_describe(const RecRecord *rec, void *edata)
     }
   }
 
-  err = send_mgmt_message(MgmtMessageType::RESPONSE, match->fd, OpType::RECORD_DESCRIBE_CONFIG, &err, &rec_name, &rec_value, &rec_default, &rec_type,
-                           &rec_class, &rec_version, &rec_rsb, &rec_order, &rec_access, &rec_update, &rec_updatetype,
-                           &rec_checktype, &rec_source, &rec_checkexpr);
+  err = send_mgmt_message(MgmtMessageType::RESPONSE, match->fd, OpType::RECORD_DESCRIBE_CONFIG, &err, &rec_name, &rec_value,
+                          &rec_default, &rec_type, &rec_class, &rec_version, &rec_rsb, &rec_order, &rec_access, &rec_update,
+                          &rec_updatetype, &rec_checktype, &rec_source, &rec_checkexpr);
 
 done:
   match->err = err;
