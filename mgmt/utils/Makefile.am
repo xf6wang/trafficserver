@@ -43,7 +43,9 @@ libutils_COMMON = \
   MgmtSocket.cc \
   MgmtSocket.h \
   MgmtUtils.cc \
-  MgmtUtils.h
+  MgmtUtils.h \
+  MgmtCallback.cc \
+  MgmtCallback.h 
 
 libutils_lm_la_SOURCES = \
   $(libutils_COMMON) \

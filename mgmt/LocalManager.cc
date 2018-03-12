@@ -550,9 +550,9 @@ LocalManager::handleMgmtMsgFromProcesses(MgmtMessageHdr *mh)
   }
   case MGMT_SIGNAL_LIBRECORDS:
     if (mh->data_len > 0) {
-      executeMgmtCallback(MGMT_SIGNAL_LIBRECORDS, data_raw, mh->data_len);
+      sendMgmtEvent(MGMT_SIGNAL_LIBRECORDS, data_raw, mh->data_len);
     } else {
-      executeMgmtCallback(MGMT_SIGNAL_LIBRECORDS, nullptr, 0);
+      sendMgmtEvent(MGMT_SIGNAL_LIBRECORDS, nullptr, 0);
     }
     break;
   // Congestion Control - begin
