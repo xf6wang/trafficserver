@@ -546,7 +546,6 @@ BufferWriter::print(TextView fmt, Rest... rest)
   auto args(std::forward_as_tuple(rest...));
   auto fa     = bw_fmt::Get_Arg_Formatter_Array<decltype(args)>(std::index_sequence_for<Rest...>{});
   int arg_idx = 0;
-  size_t base = this->size();
 
   while (fmt.size()) {
     string_view lit_v;

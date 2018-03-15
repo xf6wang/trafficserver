@@ -2,9 +2,6 @@
 #include <ctype.h>
 #include <ctime>
 
-ts::bw_fmt::GlobalTable ts::bw_fmt::BWF_GLOBAL_TABLE;
-const ts::BWFSpec ts::BWFSpec::DEFAULT;
-
 namespace
 {
 // Customized version of string to int. Using this instead of the general @c svtoi function
@@ -35,16 +32,12 @@ tv_to_positive_decimal(ts::TextView src, ts::TextView *out)
 }
 }
 
-void
-ts::bw_fmt::Err_Bad_Arg_Index(BufferWriter &w, int i, size_t n)
-{
-  static const BWFormat fmt{"{{BAD_ARG_INDEX:{} of {}}}"_sv};
-  w.print(fmt, i, n);
-}
+namespace ts {
+
+const ts::BWFSpec ts::BWFSpec::DEFAULT;
 
 /// Parse a format specification.
-ts::BWFSpec::BWFSpec(TextView fmt)
-{
+BWFSpec::BWFSpec(TextView fmt) {
   TextView num;
   intmax_t n;
 
@@ -56,7 +49,7 @@ ts::BWFSpec::BWFSpec(TextView fmt)
 
   if (fmt.size()) {
     TextView sz = fmt.take_prefix_at(':'); // the format specifier.
-    _ext        = fmt;                     // anything past the second ':' is the extension.
+    _ext = fmt;                     // anything past the second ':' is the extension.
     if (sz.size()) {
       // fill and alignment
       if ('%' == *sz) { // enable URI encoding of the fill character so metasyntactic chars can be used if needed.
@@ -97,7 +90,7 @@ ts::BWFSpec::BWFSpec(TextView fmt)
       if ('0' == *sz) {
         if (Align::NONE == _align)
           _align = Align::SIGN;
-        _fill    = '0';
+        _fill = '0';
         ++sz;
       }
       n = tv_to_positive_decimal(sz, &num);
@@ -147,6 +140,16 @@ ts::BWFSpec::BWFSpec(TextView fmt)
   }
 }
 
+namespace bw_fmt {
+
+GlobalTable BWF_GLOBAL_TABLE;
+
+void
+Err_Bad_Arg_Index(BufferWriter &w, int i, size_t n) {
+  static const BWFormat fmt{"{{BAD_ARG_INDEX:{} of {}}}"_sv};
+  w.print(fmt, i, n);
+}
+
 /** This performs generic alignment operations.
 
     If a formatter specialization performs this operation instead, that should result in output that
@@ -154,65 +157,60 @@ ts::BWFSpec::BWFSpec(TextView fmt)
     adjustments.
  */
 void
-ts::bw_fmt::Do_Alignment(BWFSpec const &spec, BufferWriter &w, BufferWriter &lw)
-{
+Do_Alignment(BWFSpec const &spec, BufferWriter &w, BufferWriter &lw) {
   size_t size = lw.size();
-  size_t min  = spec._min;
+  size_t min = spec._min;
   if (size < min) {
     size_t delta = min - size; // note - size <= extent -> size < min
     switch (spec._align) {
-    case BWFSpec::Align::NONE: // same as LEFT for output.
-    case BWFSpec::Align::LEFT:
-      w.fill(size);
-      while (delta--)
-        w.write(spec._fill);
-      break;
-    case BWFSpec::Align::RIGHT:
-      std::memmove(w.auxBuffer() + delta, w.auxBuffer(), size);
-      while (delta--)
-        w.write(spec._fill);
-      w.fill(size);
-      break;
-    case BWFSpec::Align::CENTER:
-      if (delta > 1) {
-        size_t d2 = delta / 2;
-        std::memmove(w.auxBuffer() + (delta / 2), w.auxBuffer(), size);
-        while (d2--)
+      case BWFSpec::Align::NONE: // same as LEFT for output.
+      case BWFSpec::Align::LEFT:
+        w.fill(size);
+        while (delta--)
           w.write(spec._fill);
-      }
-      w.fill(size);
-      delta = (delta + 1) / 2;
-      while (delta--)
-        w.write(spec._fill);
-      break;
-    case BWFSpec::Align::SIGN:
-      w.fill(size);
-      break;
+        break;
+      case BWFSpec::Align::RIGHT:
+        std::memmove(w.auxBuffer() + delta, w.auxBuffer(), size);
+        while (delta--)
+          w.write(spec._fill);
+        w.fill(size);
+        break;
+      case BWFSpec::Align::CENTER:
+        if (delta > 1) {
+          size_t d2 = delta / 2;
+          std::memmove(w.auxBuffer() + (delta / 2), w.auxBuffer(), size);
+          while (d2--)
+            w.write(spec._fill);
+        }
+        w.fill(size);
+        delta = (delta + 1) / 2;
+        while (delta--)
+          w.write(spec._fill);
+        break;
+      case BWFSpec::Align::SIGN:
+        w.fill(size);
+        break;
     }
   } else {
     w.fill(size);
   }
 }
 
-// Numeric conversions
-namespace ts::bw_fmt
-{
 // Conversions from remainder to character, in upper and lower case versions.
 // Really only useful for hexadecimal currently.
-namespace
-{
-  char UPPER_DIGITS[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-  char LOWER_DIGITS[] = "0123456789abcdefghijklmnopqrstuvwxyz";
+namespace {
+char UPPER_DIGITS[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+char LOWER_DIGITS[] = "0123456789abcdefghijklmnopqrstuvwxyz";
 }
+
 /// Templated radix based conversions. Only a small number of radix are supported
 /// and providing a template minimizes cut and paste code while also enabling
 /// compiler optimizations (e.g. for power of 2 radix the modulo / divide become
 /// bit operations).
-template <size_t RADIX>
+template<size_t RADIX>
 size_t
-To_Radix(uintmax_t n, char *buff, size_t width, char *digits)
-{
-  static_assert(1 < RADIX && RADIX <= 36);
+To_Radix(uintmax_t n, char *buff, size_t width, char *digits) {
+  static_assert(1 < RADIX && RADIX <= 36, "RADIX must be in the range 2..36");
   char *out = buff + width;
   if (n) {
     while (n) {
@@ -226,12 +224,11 @@ To_Radix(uintmax_t n, char *buff, size_t width, char *digits)
 }
 
 BufferWriter &
-Format_Integer(BufferWriter &w, BWFSpec const &spec, uintmax_t i, bool neg_p)
-{
-  size_t n  = 0;
+Format_Integer(BufferWriter &w, BWFSpec const &spec, uintmax_t i, bool neg_p) {
+  size_t n = 0;
   int width = static_cast<int>(spec._min); // amount left to fill.
   string_view prefix;
-  char neg     = 0;
+  char neg = 0;
   char prefix1 = spec._radix_lead_p ? '0' : 0;
   char prefix2 = 0;
   char buff[std::numeric_limits<uintmax_t>::digits + 1];
@@ -243,29 +240,29 @@ Format_Integer(BufferWriter &w, BWFSpec const &spec, uintmax_t i, bool neg_p)
   }
 
   switch (spec._type) {
-  case 'x':
-    prefix2 = 'x';
-    n       = bw_fmt::To_Radix<16>(i, buff, sizeof(buff), bw_fmt::LOWER_DIGITS);
-    break;
-  case 'X':
-    prefix2 = 'X';
-    n       = bw_fmt::To_Radix<16>(i, buff, sizeof(buff), bw_fmt::UPPER_DIGITS);
-    break;
-  case 'b':
-    prefix2 = 'b';
-    n       = bw_fmt::To_Radix<2>(i, buff, sizeof(buff), bw_fmt::LOWER_DIGITS);
-    break;
-  case 'B':
-    prefix2 = 'B';
-    n       = bw_fmt::To_Radix<2>(i, buff, sizeof(buff), bw_fmt::UPPER_DIGITS);
-    break;
-  case 'o':
-    n = bw_fmt::To_Radix<8>(i, buff, sizeof(buff), bw_fmt::LOWER_DIGITS);
-    break;
-  default:
-    prefix1 = 0;
-    n       = bw_fmt::To_Radix<10>(i, buff, sizeof(buff), bw_fmt::LOWER_DIGITS);
-    break;
+    case 'x':
+      prefix2 = 'x';
+      n = bw_fmt::To_Radix<16>(i, buff, sizeof(buff), bw_fmt::LOWER_DIGITS);
+      break;
+    case 'X':
+      prefix2 = 'X';
+      n = bw_fmt::To_Radix<16>(i, buff, sizeof(buff), bw_fmt::UPPER_DIGITS);
+      break;
+    case 'b':
+      prefix2 = 'b';
+      n = bw_fmt::To_Radix<2>(i, buff, sizeof(buff), bw_fmt::LOWER_DIGITS);
+      break;
+    case 'B':
+      prefix2 = 'B';
+      n = bw_fmt::To_Radix<2>(i, buff, sizeof(buff), bw_fmt::UPPER_DIGITS);
+      break;
+    case 'o':
+      n = bw_fmt::To_Radix<8>(i, buff, sizeof(buff), bw_fmt::LOWER_DIGITS);
+      break;
+    default:
+      prefix1 = 0;
+      n = bw_fmt::To_Radix<10>(i, buff, sizeof(buff), bw_fmt::LOWER_DIGITS);
+      break;
   }
   // Clip fill width by stuff that's already committed to be written.
   if (neg)
@@ -281,109 +278,107 @@ Format_Integer(BufferWriter &w, BWFSpec const &spec, uintmax_t i, bool neg_p)
   // The idea here is the various pieces have all been assembled, the only difference
   // is the order in which they are written to the output.
   switch (spec._align) {
-  case BWFSpec::Align::LEFT:
-    if (neg)
-      w.write(neg);
-    if (prefix1) {
-      w.write(prefix1);
-      if (prefix2)
-        w.write(prefix2);
-    }
-    w.write(digits);
-    while (width-- > 0)
-      w.write(spec._fill);
-    break;
-  case BWFSpec::Align::RIGHT:
-    while (width-- > 0)
-      w.write(spec._fill);
-    if (neg)
-      w.write(neg);
-    if (prefix1) {
-      w.write(prefix1);
-      if (prefix2)
-        w.write(prefix2);
-    }
-    w.write(digits);
-    break;
-  case BWFSpec::Align::CENTER:
-    for (int i = width / 2; i > 0; --i)
-      w.write(spec._fill);
-    if (neg)
-      w.write(neg);
-    if (prefix1) {
-      w.write(prefix1);
-      if (prefix2)
-        w.write(prefix2);
-    }
-    w.write(digits);
-    for (int i = (width + 1) / 2; i > 0; --i)
-      w.write(spec._fill);
-    break;
-  case BWFSpec::Align::SIGN:
-    if (neg)
-      w.write(neg);
-    if (prefix1) {
-      w.write(prefix1);
-      if (prefix2)
-        w.write(prefix2);
-    }
-    while (width-- > 0)
-      w.write(spec._fill);
-    w.write(digits);
-    break;
-  default:
-    if (neg)
-      w.write(neg);
-    if (prefix1) {
-      w.write(prefix1);
-      if (prefix2)
-        w.write(prefix2);
-    }
-    w.write(digits);
-    break;
+    case BWFSpec::Align::LEFT:
+      if (neg)
+        w.write(neg);
+      if (prefix1) {
+        w.write(prefix1);
+        if (prefix2)
+          w.write(prefix2);
+      }
+      w.write(digits);
+      while (width-- > 0)
+        w.write(spec._fill);
+      break;
+    case BWFSpec::Align::RIGHT:
+      while (width-- > 0)
+        w.write(spec._fill);
+      if (neg)
+        w.write(neg);
+      if (prefix1) {
+        w.write(prefix1);
+        if (prefix2)
+          w.write(prefix2);
+      }
+      w.write(digits);
+      break;
+    case BWFSpec::Align::CENTER:
+      for (int i = width / 2; i > 0; --i)
+        w.write(spec._fill);
+      if (neg)
+        w.write(neg);
+      if (prefix1) {
+        w.write(prefix1);
+        if (prefix2)
+          w.write(prefix2);
+      }
+      w.write(digits);
+      for (int i = (width + 1) / 2; i > 0; --i)
+        w.write(spec._fill);
+      break;
+    case BWFSpec::Align::SIGN:
+      if (neg)
+        w.write(neg);
+      if (prefix1) {
+        w.write(prefix1);
+        if (prefix2)
+          w.write(prefix2);
+      }
+      while (width-- > 0)
+        w.write(spec._fill);
+      w.write(digits);
+      break;
+    default:
+      if (neg)
+        w.write(neg);
+      if (prefix1) {
+        w.write(prefix1);
+        if (prefix2)
+          w.write(prefix2);
+      }
+      w.write(digits);
+      break;
   }
   return w;
 }
 
-} // ts::detail
+} // bw_fmt
 
-ts::BufferWriter &
-ts::bwformat(BufferWriter &w, BWFSpec const &spec, string_view sv)
-{
+BufferWriter &
+bwformat(BufferWriter &w, BWFSpec const &spec, string_view sv) {
   int width = static_cast<int>(spec._min); // amount left to fill.
   if (spec._prec > 0)
     sv.remove_prefix(spec._prec);
 
   width -= sv.size();
   switch (spec._align) {
-  case BWFSpec::Align::LEFT:
-  case BWFSpec::Align::SIGN:
-    w.write(sv);
-    while (width-- > 0)
-      w.write(spec._fill);
-    break;
-  case BWFSpec::Align::RIGHT:
-    while (width-- > 0)
-      w.write(spec._fill);
-    w.write(sv);
-    break;
-  case BWFSpec::Align::CENTER:
-    for (int i = width / 2; i > 0; --i)
-      w.write(spec._fill);
-    w.write(sv);
-    for (int i = (width + 1) / 2; i > 0; --i)
-      w.write(spec._fill);
-    break;
-  default:
-    w.write(sv);
-    break;
+    case BWFSpec::Align::LEFT:
+    case BWFSpec::Align::SIGN:
+      w.write(sv);
+      while (width-- > 0)
+        w.write(spec._fill);
+      break;
+    case BWFSpec::Align::RIGHT:
+      while (width-- > 0)
+        w.write(spec._fill);
+      w.write(sv);
+      break;
+    case BWFSpec::Align::CENTER:
+      for (int i = width / 2; i > 0; --i)
+        w.write(spec._fill);
+      w.write(sv);
+      for (int i = (width + 1) / 2; i > 0; --i)
+        w.write(spec._fill);
+      break;
+    default:
+      w.write(sv);
+      break;
   }
   return w;
 }
 
 /// Preparse format string for later use.
-ts::BWFormat::BWFormat(ts::TextView fmt)
-{
+BWFormat::BWFormat(ts::TextView fmt) {
   BWFSpec lit_spec{BWFSpec::DEFAULT};
   int arg_idx = 0;
 
@@ -411,13 +406,11 @@ ts::BWFormat::BWFormat(ts::TextView fmt)
   }
 }
 
-ts::BWFormat::~BWFormat()
-{
+BWFormat::~BWFormat() {
 }
 
 bool
-ts::BWFormat::parse(ts::TextView &fmt, string_view &literal, string_view &specifier)
-{
+BWFormat::parse(ts::TextView &fmt, string_view &literal, string_view &specifier) {
   TextView::size_type off;
 
   off = fmt.find_if([](char c) { return '{' == c || '}' == c; });
@@ -457,14 +450,12 @@ ts::BWFormat::parse(ts::TextView &fmt, string_view &literal, string_view &specif
 }
 
 void
-ts::BWFormat::Format_Literal(BufferWriter &w, BWFSpec const &spec)
-{
+BWFormat::Format_Literal(BufferWriter &w, BWFSpec const &spec) {
   w.write(spec._ext);
 }
 
-ts::bw_fmt::GlobalSignature
-ts::bw_fmt::Global_Table_Find(string_view name)
-{
+bw_fmt::GlobalSignature
+bw_fmt::Global_Table_Find(string_view name) {
   if (name.size()) {
     auto spot = bw_fmt::BWF_GLOBAL_TABLE.find(name);
     if (spot != bw_fmt::BWF_GLOBAL_TABLE.end())
@@ -472,6 +463,8 @@ ts::bw_fmt::Global_Table_Find(string_view name)
   }
   return nullptr;
 }
+
+} // ts
 
 namespace
 {
