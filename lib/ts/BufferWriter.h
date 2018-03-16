@@ -492,6 +492,9 @@ namespace bw_fmt
   /// Generic integral conversion.
   BufferWriter &Format_Integer(BufferWriter &w, BWFSpec const &spec, uintmax_t n, bool negative_p);
 
+  /// Generic floating conversion.
+  BufferWriter &Format_Floating(BufferWriter &w, BWFSpec const &spec, double n, bool negative_p);
+
 } // bw_fmt
 
 /** Compiled BufferWriter format
@@ -679,6 +682,31 @@ inline BufferWriter &
 operator<<(BufferWriter &w, int const &i)
 {
   return bwformat(w, BWFSpec::DEFAULT, static_cast<intmax_t>(i));
+}
+
+//-- Floating type(s)
+inline BufferWriter &
+bwformat(BufferWriter &w, BWFSpec const &spec, double const &d)
+{
+  return d < 0 ? bw_fmt::Format_Floating(w, spec, -d, true) : bw_fmt::Format_Floating(w, spec, d, false);
+}
+
+inline BufferWriter & 
+bwformat(BufferWriter &w, BWFSpec const &spec, float const &f)
+{
+  return f < 0 ? bw_fmt::Format_Floating(w, spec, -f, true) : bw_fmt::Format_Floating(w, spec, f, false);
+}
+
+inline BufferWriter & 
+operator<<(BufferWriter &w, double const &d)
+{
+  return bwformat(w, BWFSpec::DEFAULT, d);
+}
+
+inline BufferWriter &
+operator<<(BufferWriter &w, float const &f)
+{
+  return bwformat(w, BWFSpec::DEFAULT, f);
 }
 
 } // end namespace ts
