@@ -1,6 +1,7 @@
 #include <ts/BufferWriter.h>
 #include <ctype.h>
 #include <ctime>
+#include <math.h>
 
 namespace
 {
@@ -338,6 +339,107 @@ Format_Integer(BufferWriter &w, BWFSpec const &spec, uintmax_t i, bool neg_p) {
       }
       w.write(digits);
       break;
+  }
+  return w;
+}
+
+/// Format for floating point values. Seperates floating point into a whole number and a
+/// fraction. The fraction is converted into an unsigned integer based on the specified 
+/// precision, spec._prec. ie. 3.1415 with precision two is seperated into two unsigned 
+/// integers 3 and 14. The different pieces are assembled and placed into the BufferWriter.
+/// The default is two decimal places. ie. X.XX. The value is always written in base 10.
+///
+/// format: whole.fraction 
+///     or: left.right
+BufferWriter &
+Format_Floating(BufferWriter &w, BWFSpec const &spec, double f, bool neg_p)
+{
+  if(f == static_cast<uint64_t>(f)) { //integral 
+    return Format_Integer(w, spec, static_cast<uint64_t>(f), neg_p);
+  }
+
+  double left, right;
+  size_t l  = 0;
+  size_t r  = 0;
+  char whole[std::numeric_limits<double>::digits + 1];     
+  char fraction[std::numeric_limits<double>::digits + 1]; 
+  char dec     = '.';
+  char neg     = 0;
+  int width = static_cast<int>(spec._min); // amount left to fill.
+  int precision = (spec._prec == BWFSpec::DEFAULT._prec) ? 2 : spec._prec; // default precision 2 
+
+  right = modf(f, &left); // split the number
+
+  if (neg_p) {
+    neg = '-';
+  } else if (spec._sign != '-') {
+    neg = spec._sign;
+  }
+
+  // Convert trailing fraction into an integer value. 
+  // Final precision point is always rounded. 
+  uint64_t shift = 1;
+  for(int i = 0; i < precision; ++i) {
+    shift *= 10;
+  }
+  uint64_t right_p = static_cast<uint64_t>(right * shift + 0.5 /* rounding */);
+
+  l = bw_fmt::To_Radix<10>(left, whole, sizeof(whole), bw_fmt::LOWER_DIGITS);
+  r = bw_fmt::To_Radix<10>(right_p, fraction, sizeof(fraction), bw_fmt::LOWER_DIGITS);
+
+  // Clip fill width
+  if (neg)
+    --width;
+  width -= static_cast<int>(l);
+  width -= 1; // '.'
+  width -= static_cast<int>(r);
+
+  string_view whole_digits{whole + sizeof(whole) - l, l};       
+  string_view frac_digits{fraction + sizeof(fraction) - r, r};  
+
+  // The idea here is the various pieces have all been assembled, the only difference
+  // is the order in which they are written to the output.
+  #define FLUSH_NUM(w, integral, fraction) \
+            w.write(integral);             \
+            w.write(dec);                  \
+            w.write(fraction);
+
+  switch (spec._align) {
+  case BWFSpec::Align::LEFT:
+    if (neg)
+      w.write(neg);
+    FLUSH_NUM(w, whole_digits, frac_digits);
+    while (width-- > 0)
+      w.write(spec._fill);
+    break;
+  case BWFSpec::Align::RIGHT:
+    while (width-- > 0)
+      w.write(spec._fill);
+    if (neg)
+      w.write(neg);
+    FLUSH_NUM(w, whole_digits, frac_digits);
+    break;
+  case BWFSpec::Align::CENTER:
+    for (int i = width / 2; i > 0; --i)
+      w.write(spec._fill);
+    if (neg)
+      w.write(neg);
+    FLUSH_NUM(w, whole_digits, frac_digits);
+    for (int i = (width + 1) / 2; i > 0; --i)
+      w.write(spec._fill);
+    break;
+  case BWFSpec::Align::SIGN:
+    if (neg)
+      w.write(neg);
+    while (width-- > 0)
+      w.write(spec._fill);
+    FLUSH_NUM(w, whole_digits, frac_digits);
+    break;
+  default:
+    if (neg)
+      w.write(neg);
+    FLUSH_NUM(w, whole_digits, frac_digits);
+    break;
   }
   return w;
 }
