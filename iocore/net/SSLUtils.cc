@@ -40,6 +40,8 @@
 #include <openssl/rand.h>
 #include <openssl/dh.h>
 #include <openssl/bn.h>
+#include <openssl/engine.h>
+#include <openssl/conf.h>
 #include <unistd.h>
 #include <termios.h>
 #include <vector>
@@ -317,7 +319,6 @@ ssl_rm_cached_session(SSL_CTX *ctx, SSL_SESSION *sess)
   session_cache->removeSession(sid);
 }
 
-#if TS_USE_TLS_SNI
 int
 set_context_cert(SSL *ssl)
 {
@@ -330,7 +331,6 @@ set_context_cert(SSL *ssl)
   int retval               = 1;
 
   Debug("ssl", "set_context_cert ssl=%p server=%s handshake_complete=%d", ssl, servername, netvc->getSSLHandShakeComplete());
-  // set SSL trace (we do this a little later in the USE_TLS_SNI case so we can get the servername
   if (SSLConfigParams::ssl_wire_trace_enabled) {
     bool trace = netvc->computeSSLTrace();
     Debug("ssl", "sslnetvc. setting trace to=%s", trace ? "true" : "false");
@@ -392,6 +392,18 @@ set_context_cert(SSL *ssl)
   }
 done:
   return retval;
+}
+
+// Callback function for verifying client certificate
+int
+ssl_verify_client_callback(int preverify_ok, X509_STORE_CTX *ctx)
+{
+  Debug("ssl", "Callback: verify client cert");
+  auto *ssl                = static_cast<SSL *>(X509_STORE_CTX_get_ex_data(ctx, SSL_get_ex_data_X509_STORE_CTX_idx()));
+  SSLNetVConnection *netvc = SSLNetVCAccess(ssl);
+
+  netvc->callHooks(TS_EVENT_SSL_VERIFY_CLIENT);
+  return SSL_TLSEXT_ERR_OK;
 }
 
 // Use the certificate callback for openssl 1.0.2 and greater
@@ -495,7 +507,6 @@ done:
   return retval;
 }
 #endif
-#endif /* TS_USE_TLS_SNI */
 
 #if TS_USE_GET_DH_2048_256 == 0
 /* Build 2048-bit MODP Group with 256-bit Prime Order Subgroup from RFC 5114 */
@@ -884,6 +895,22 @@ SSLInitializeLibrary()
 
     SSL_load_error_strings();
     SSL_library_init();
+
+#if TS_USE_TLS_ASYNC
+    if (SSLConfigParams::async_handshake_enabled) {
+      ASYNC_init_thread(0, 0);
+    }
+#endif
+
+    if (SSLConfigParams::engine_conf_file) {
+      ENGINE_load_dynamic();
+
+      OPENSSL_load_builtin_modules();
+      if (CONF_modules_load_file(SSLConfigParams::engine_conf_file, nullptr, 0) <= 0) {
+        Error("FATAL: error loading engine configuration file %s", SSLConfigParams::engine_conf_file);
+        // ERR_print_errors_fp(stderr);
+      }
+    }
 
 #ifdef OPENSSL_FIPS
     // calling FIPS_mode_set() will force FIPS to POST (Power On Self Test)
@@ -1492,14 +1519,12 @@ ssl_callback_info(const SSL *ssl, int where, int ret)
 static void
 ssl_set_handshake_callbacks(SSL_CTX *ctx)
 {
-#if TS_USE_TLS_SNI
 // Make sure the callbacks are set
 #if TS_USE_CERT_CB
   SSL_CTX_set_cert_cb(ctx, ssl_cert_callback, nullptr);
   SSL_CTX_set_tlsext_servername_callback(ctx, ssl_servername_only_callback);
 #else
   SSL_CTX_set_tlsext_servername_callback(ctx, ssl_servername_and_cert_callback);
-#endif
 #endif
 }
 
@@ -1727,7 +1752,7 @@ SSLInitServerContext(const SSLConfigParams *params, const ssl_user_config *sslMu
       server_verify_client = SSL_VERIFY_NONE;
       Error("illegal client certification level %d in records.config", server_verify_client);
     }
-    SSL_CTX_set_verify(ctx, server_verify_client, nullptr);
+    SSL_CTX_set_verify(ctx, server_verify_client, ssl_verify_client_callback);
     SSL_CTX_set_verify_depth(ctx, params->verify_depth); // might want to make configurable at some point.
   }
 

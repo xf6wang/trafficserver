@@ -37,6 +37,9 @@
 #include <climits>
 #include <string>
 #include <stdbool.h>
+#if TS_USE_TLS_ASYNC
+#include <openssl/async.h>
+#endif
 
 #if !TS_USE_SET_RBIO
 // Defined in SSLInternal.c, should probably make a separate include
@@ -956,15 +959,6 @@ SSLNetVConnection::sslStartHandShake(int event, int &err)
       // to negotiate a SSL session, but it's enough to trampoline us into the SNI callback where we
       // can select the right server certificate.
       this->ssl = make_ssl_connection(lookup->defaultContext(), this);
-
-#if !(TS_USE_TLS_SNI)
-      // set SSL trace
-      if (SSLConfigParams::ssl_wire_trace_enabled) {
-        bool trace = computeSSLTrace();
-        Debug("ssl", "sslnetvc. setting trace to=%s", trace ? "true" : "false");
-        setSSLTrace(trace);
-      }
-#endif
     }
 
     if (this->ssl == nullptr) {
@@ -1017,7 +1011,6 @@ SSLNetVConnection::sslStartHandShake(int event, int &err)
       }
       SSL_set_verify(this->ssl, clientVerify ? SSL_VERIFY_PEER : SSL_VERIFY_NONE, verify_callback);
 
-#if TS_USE_TLS_SNI
       if (this->options.sni_servername) {
         if (SSL_set_tlsext_host_name(this->ssl, this->options.sni_servername)) {
           Debug("ssl", "using SNI name '%s' for client handshake", this->options.sni_servername.get());
@@ -1026,7 +1019,6 @@ SSLNetVConnection::sslStartHandShake(int event, int &err)
           SSL_INCREMENT_DYN_STAT(ssl_sni_name_set_failure);
         }
       }
-#endif
     }
 
     return sslClientHandShakeEvent(err);
@@ -1041,7 +1033,8 @@ int
 SSLNetVConnection::sslServerHandShakeEvent(int &err)
 {
   // Continue on if we are in the invoked state.  The hook has not yet reenabled
-  if (sslHandshakeHookState == HANDSHAKE_HOOKS_CERT_INVOKE || sslHandshakeHookState == HANDSHAKE_HOOKS_PRE_INVOKE) {
+  if (sslHandshakeHookState == HANDSHAKE_HOOKS_CERT_INVOKE || sslHandshakeHookState == HANDSHAKE_HOOKS_CLIENT_CERT_INVOKE ||
+      sslHandshakeHookState == HANDSHAKE_HOOKS_PRE_INVOKE) {
     return SSL_WAIT_FOR_HOOK;
   }
 
@@ -1114,8 +1107,34 @@ SSLNetVConnection::sslServerHandShakeEvent(int &err)
     } // Still data in the BIO
   }
 
+#if TS_USE_TLS_ASYNC
+  if (SSLConfigParams::async_handshake_enabled) {
+    SSL_set_mode(ssl, SSL_MODE_ASYNC);
+  }
+#endif
   ssl_error_t ssl_error = SSLAccept(ssl);
-  bool trace            = getSSLTrace();
+#if TS_USE_TLS_ASYNC
+  if (ssl_error == SSL_ERROR_WANT_ASYNC && this->signalep.type == 0) {
+    size_t numfds;
+    OSSL_ASYNC_FD waitfd;
+    // Set up the epoll entry for the signalling
+    if (SSL_get_all_async_fds(ssl, &waitfd, &numfds) && numfds > 0) {
+      PollDescriptor *pd = get_PollDescriptor(this_ethread());
+      this->signalep.start(pd, waitfd, this, EVENTIO_READ);
+      this->signalep.type = EVENTIO_READWRITE_VC;
+    }
+  } else
+#endif
+    if (ssl_error == SSL_ERROR_NONE || ssl_error == SSL_ERROR_SSL) {
+#if TS_USE_TLS_ASYNC
+    if (SSLConfigParams::async_handshake_enabled) {
+      // Clean up the epoll entry for signalling
+      SSL_clear_mode(ssl, SSL_MODE_ASYNC);
+      this->signalep.stop();
+    }
+#endif
+  }
+  bool trace = getSSLTrace();
 
   if (ssl_error != SSL_ERROR_NONE) {
     err = errno;
@@ -1232,6 +1251,12 @@ SSLNetVConnection::sslServerHandShakeEvent(int &err)
       //  Stopping for some other reason, perhaps loading certificate
       return SSL_WAIT_FOR_HOOK;
     }
+#endif
+
+#if TS_USE_TLS_ASYNC
+  case SSL_ERROR_WANT_ASYNC:
+    TraceIn(trace, get_remote_addr(), get_remote_port(), "SSL server handshake ERROR_WANT_ASYNC");
+    return EVENT_CONT;
 #endif
 
   case SSL_ERROR_WANT_ACCEPT:
@@ -1434,7 +1459,10 @@ SSLNetVConnection::reenable(NetHandler *nh)
   }
   if (curHook != nullptr) {
     // Invoke the hook and return, wait for next reenable
-    if (sslHandshakeHookState == HANDSHAKE_HOOKS_CERT) {
+    if (sslHandshakeHookState == HANDSHAKE_HOOKS_CLIENT_CERT) {
+      sslHandshakeHookState = HANDSHAKE_HOOKS_CLIENT_CERT_INVOKE;
+      curHook->invoke(TS_EVENT_SSL_VERIFY_CLIENT, this);
+    } else if (sslHandshakeHookState == HANDSHAKE_HOOKS_CERT) {
       sslHandshakeHookState = HANDSHAKE_HOOKS_CERT_INVOKE;
       curHook->invoke(TS_EVENT_SSL_CERT, this);
     } else if (sslHandshakeHookState == HANDSHAKE_HOOKS_SNI) {
@@ -1457,6 +1485,10 @@ SSLNetVConnection::reenable(NetHandler *nh)
       break;
     case HANDSHAKE_HOOKS_CERT:
     case HANDSHAKE_HOOKS_CERT_INVOKE:
+      sslHandshakeHookState = HANDSHAKE_HOOKS_CLIENT_CERT;
+      break;
+    case HANDSHAKE_HOOKS_CLIENT_CERT:
+    case HANDSHAKE_HOOKS_CLIENT_CERT_INVOKE:
       sslHandshakeHookState = HANDSHAKE_HOOKS_DONE;
       break;
     default:
@@ -1470,16 +1502,12 @@ SSLNetVConnection::reenable(NetHandler *nh)
 bool
 SSLNetVConnection::sslContextSet(void *ctx)
 {
-#if TS_USE_TLS_SNI
   bool zret = true;
   if (ssl) {
     SSL_set_SSL_CTX(ssl, static_cast<SSL_CTX *>(ctx));
   } else {
     zret = false;
   }
-#else
-  bool zret      = false;
-#endif
   return zret;
 }
 
@@ -1489,7 +1517,8 @@ bool
 SSLNetVConnection::callHooks(TSEvent eventId)
 {
   // Only dealing with the SNI/CERT hook so far.
-  ink_assert(eventId == TS_EVENT_SSL_CERT || eventId == TS_EVENT_SSL_SERVERNAME || eventId == TS_EVENT_SSL_SERVER_VERIFY_HOOK);
+  ink_assert(eventId == TS_EVENT_SSL_CERT || eventId == TS_EVENT_SSL_SERVERNAME || eventId == TS_EVENT_SSL_SERVER_VERIFY_HOOK ||
+             eventId == TS_EVENT_SSL_VERIFY_CLIENT);
   Debug("ssl", "callHooks sslHandshakeHookState=%d", this->sslHandshakeHookState);
 
   // Move state if it is appropriate
@@ -1538,9 +1567,17 @@ SSLNetVConnection::callHooks(TSEvent eventId)
       curHook = curHook->next();
     }
     if (curHook == nullptr) {
-      this->sslHandshakeHookState = HANDSHAKE_HOOKS_DONE;
+      this->sslHandshakeHookState = HANDSHAKE_HOOKS_CLIENT_CERT;
     } else {
       this->sslHandshakeHookState = HANDSHAKE_HOOKS_CERT_INVOKE;
+    }
+    break;
+  case HANDSHAKE_HOOKS_CLIENT_CERT:
+  case HANDSHAKE_HOOKS_CLIENT_CERT_INVOKE:
+    if (!curHook) {
+      curHook = ssl_hooks->get(TS_SSL_VERIFY_CLIENT_INTERNAL_HOOK);
+    } else {
+      curHook = curHook->next();
     }
     break;
   default:
@@ -1585,8 +1622,7 @@ SSLNetVConnection::callHooks(TSEvent eventId)
 bool
 SSLNetVConnection::computeSSLTrace()
 {
-// this has to happen before the handshake or else sni_servername will be nullptr
-#if TS_USE_TLS_SNI
+  // this has to happen before the handshake or else sni_servername will be nullptr
   bool sni_trace;
   if (ssl) {
     const char *ssl_servername   = SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name);
@@ -1596,9 +1632,6 @@ SSLNetVConnection::computeSSLTrace()
   } else {
     sni_trace = false;
   }
-#else
-  bool sni_trace = false;
-#endif
 
   // count based on ip only if they set an IP value
   const sockaddr *remote_addr = get_remote_addr();

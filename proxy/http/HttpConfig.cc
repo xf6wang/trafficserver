@@ -603,6 +603,15 @@ register_stat_callbacks()
   RecRegisterRawStat(http_rsb, RECT_PROCESS, "proxy.process.http.err_client_abort_origin_server_bytes_stat", RECD_INT,
                      RECP_PERSISTENT, (int)http_err_client_abort_origin_server_bytes_stat, RecRawStatSyncSum);
 
+  RecRegisterRawStat(http_rsb, RECT_PROCESS, "proxy.process.http.err_client_read_error_count_stat", RECD_COUNTER, RECP_PERSISTENT,
+                     (int)http_err_client_read_error_count_stat, RecRawStatSyncCount);
+
+  RecRegisterRawStat(http_rsb, RECT_PROCESS, "proxy.process.http.err_client_read_error_user_agent_bytes_stat", RECD_INT,
+                     RECP_PERSISTENT, (int)http_err_client_read_error_user_agent_bytes_stat, RecRawStatSyncSum);
+
+  RecRegisterRawStat(http_rsb, RECT_PROCESS, "proxy.process.http.err_client_read_error_origin_server_bytes_stat", RECD_INT,
+                     RECP_PERSISTENT, (int)http_err_client_read_error_origin_server_bytes_stat, RecRawStatSyncSum);
+
   RecRegisterRawStat(http_rsb, RECT_PROCESS, "proxy.process.http.err_connect_fail_count_stat", RECD_COUNTER, RECP_PERSISTENT,
                      (int)http_err_connect_fail_count_stat, RecRawStatSyncCount);
 
@@ -957,6 +966,7 @@ HttpConfig::startup()
   HttpEstablishStaticConfigLongLong(c.oride.flow_high_water_mark, "proxy.config.http.flow_control.high_water");
   HttpEstablishStaticConfigLongLong(c.oride.flow_low_water_mark, "proxy.config.http.flow_control.low_water");
   HttpEstablishStaticConfigByte(c.oride.post_check_content_length_enabled, "proxy.config.http.post.check.content_length.enabled");
+  HttpEstablishStaticConfigByte(c.oride.request_buffer_enabled, "proxy.config.http.request_buffer_enabled");
   HttpEstablishStaticConfigByte(c.strict_uri_parsing, "proxy.config.http.strict_uri_parsing");
 
   // [amc] This is a bit of a mess, need to figure out to make this cleaner.
@@ -1122,6 +1132,7 @@ HttpConfig::startup()
   HttpEstablishStaticConfigByte(c.record_cop_page, "proxy.config.http.record_heartbeat");
 
   HttpEstablishStaticConfigByte(c.oride.send_http11_requests, "proxy.config.http.send_http11_requests");
+  HttpEstablishStaticConfigByte(c.oride.allow_multi_range, "proxy.config.http.allow_multi_range");
 
   // HTTP Referer Filtering
   HttpEstablishStaticConfigByte(c.referer_filter_enabled, "proxy.config.http.referer_filter");
@@ -1237,6 +1248,8 @@ HttpConfig::reconfigure()
 
   params->oride.post_check_content_length_enabled = INT_TO_BOOL(m_master.oride.post_check_content_length_enabled);
 
+  params->oride.request_buffer_enabled = INT_TO_BOOL(m_master.oride.request_buffer_enabled);
+
   params->oride.flow_control_enabled = INT_TO_BOOL(m_master.oride.flow_control_enabled);
   params->oride.flow_high_water_mark = m_master.oride.flow_high_water_mark;
   params->oride.flow_low_water_mark  = m_master.oride.flow_low_water_mark;
@@ -1307,7 +1320,7 @@ HttpConfig::reconfigure()
   params->oride.anonymize_remove_user_agent = INT_TO_BOOL(m_master.oride.anonymize_remove_user_agent);
   params->oride.anonymize_remove_cookie     = INT_TO_BOOL(m_master.oride.anonymize_remove_cookie);
   params->oride.anonymize_remove_client_ip  = INT_TO_BOOL(m_master.oride.anonymize_remove_client_ip);
-  params->oride.anonymize_insert_client_ip  = INT_TO_BOOL(m_master.oride.anonymize_insert_client_ip);
+  params->oride.anonymize_insert_client_ip  = m_master.oride.anonymize_insert_client_ip;
   params->anonymize_other_header_list       = ats_strdup(m_master.anonymize_other_header_list);
 
   params->oride.global_user_agent_header = ats_strdup(m_master.oride.global_user_agent_header);
@@ -1377,6 +1390,7 @@ HttpConfig::reconfigure()
   params->oride.cache_required_headers = m_master.oride.cache_required_headers;
   params->oride.cache_range_lookup     = INT_TO_BOOL(m_master.oride.cache_range_lookup);
   params->oride.cache_range_write      = INT_TO_BOOL(m_master.oride.cache_range_write);
+  params->oride.allow_multi_range      = m_master.oride.allow_multi_range;
 
   params->connect_ports_string = ats_strdup(m_master.connect_ports_string);
   params->connect_ports        = parse_ports_list(params->connect_ports_string);

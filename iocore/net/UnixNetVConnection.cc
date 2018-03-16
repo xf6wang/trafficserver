@@ -684,7 +684,7 @@ UnixNetVConnection::do_io_shutdown(ShutdownHowTo_t howto)
     read.vio.buffer.clear();
     read.vio.nbytes = 0;
     read.vio._cont  = nullptr;
-    f.shutdown      = NET_VC_SHUTDOWN_READ;
+    f.shutdown |= NET_VC_SHUTDOWN_READ;
     break;
   case IO_SHUTDOWN_WRITE:
     socketManager.shutdown(((UnixNetVConnection *)this)->con.fd, 1);
@@ -692,7 +692,7 @@ UnixNetVConnection::do_io_shutdown(ShutdownHowTo_t howto)
     write.vio.buffer.clear();
     write.vio.nbytes = 0;
     write.vio._cont  = nullptr;
-    f.shutdown       = NET_VC_SHUTDOWN_WRITE;
+    f.shutdown |= NET_VC_SHUTDOWN_WRITE;
     break;
   case IO_SHUTDOWN_READWRITE:
     socketManager.shutdown(((UnixNetVConnection *)this)->con.fd, 2);
@@ -1234,9 +1234,10 @@ UnixNetVConnection::connectUp(EThread *t, int fd)
   int res;
 
   thread = t;
-  if (check_net_throttle(CONNECT, submit_time)) {
-    check_throttle_warning();
+  if (check_net_throttle(CONNECT)) {
+    check_throttle_warning(CONNECT);
     res = -ENET_THROTTLING;
+    NET_INCREMENT_DYN_STAT(net_connections_throttled_out_stat);
     goto fail;
   }
 
@@ -1272,13 +1273,6 @@ UnixNetVConnection::connectUp(EThread *t, int fd)
     con.fd           = fd;
     con.is_connected = true;
     con.is_bound     = true;
-  }
-
-  if (check_emergency_throttle(con)) {
-    // Set errno force to EMFILE (reached limit for open file descriptors)
-    errno = EMFILE;
-    res   = -errno;
-    goto fail;
   }
 
   // Must connect after EventIO::Start() to avoid a race condition

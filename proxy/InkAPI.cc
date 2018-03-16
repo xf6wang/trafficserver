@@ -2137,7 +2137,10 @@ TSUrlLengthGet(TSMBuffer bufp, TSMLoc obj)
 char *
 TSUrlStringGet(TSMBuffer bufp, TSMLoc obj, int *length)
 {
-  sdk_assert(sdk_sanity_check_mbuffer(bufp) == TS_SUCCESS);
+  // bufp is not actually used anymore, so it can be null.
+  if (bufp) {
+    sdk_assert(sdk_sanity_check_mbuffer(bufp) == TS_SUCCESS);
+  }
   sdk_assert(sdk_sanity_check_url_handle(obj) == TS_SUCCESS);
   sdk_assert(sdk_sanity_check_null_ptr((void *)length) == TS_SUCCESS);
 
@@ -4064,7 +4067,7 @@ TSCacheKeyDigestSet(TSCacheKey key, const char *input, int length)
     return TS_ERROR;
   }
 
-  MD5Context().hash_immediate(ci->cache_key, input, length);
+  CryptoContext().hash_immediate(ci->cache_key, input, length);
   return TS_SUCCESS;
 }
 
@@ -4077,7 +4080,7 @@ TSCacheKeyDigestFromUrlSet(TSCacheKey key, TSMLoc url)
     return TS_ERROR;
   }
 
-  url_MD5_get((URLImpl *)url, &((CacheInfo *)key)->cache_key);
+  url_CryptoHash_get((URLImpl *)url, &((CacheInfo *)key)->cache_key);
   return TS_SUCCESS;
 }
 
@@ -5122,7 +5125,7 @@ TSHttpTxnNewCacheLookupDo(TSHttpTxn txnp, TSMBuffer bufp, TSMLoc url_loc)
   sdk_assert(sdk_sanity_check_url_handle(url_loc) == TS_SUCCESS);
 
   URL new_url, *client_url, *l_url, *o_url;
-  INK_MD5 md51, md52;
+  CryptoHash crypto_hash1, crypto_hash2;
 
   new_url.m_heap     = ((HdrHeapSDKHandle *)bufp)->m_heap;
   new_url.m_url_impl = (URLImpl *)url_loc;
@@ -5146,9 +5149,9 @@ TSHttpTxnNewCacheLookupDo(TSHttpTxn txnp, TSMBuffer bufp, TSMLoc url_loc)
     s->cache_info.lookup_url = &(s->cache_info.lookup_url_storage);
     l_url                    = s->cache_info.lookup_url;
   } else {
-    l_url->hash_get(&md51);
-    new_url.hash_get(&md52);
-    if (md51 == md52) {
+    l_url->hash_get(&crypto_hash1);
+    new_url.hash_get(&crypto_hash2);
+    if (crypto_hash1 == crypto_hash2) {
       return TS_ERROR;
     }
     o_url = &(s->cache_info.original_url);
@@ -7465,7 +7468,7 @@ TSCacheHttpInfoKeySet(TSCacheHttpInfo infop, TSCacheKey keyp)
 {
   // TODO: Check input ?
   CacheHTTPInfo *info = (CacheHTTPInfo *)infop;
-  INK_MD5 *key        = (INK_MD5 *)keyp;
+  CryptoHash *key     = (CryptoHash *)keyp;
 
   info->object_key_set(*key);
 }
@@ -7489,10 +7492,19 @@ TSHttpTxnFollowRedirect(TSHttpTxn txnp, int on)
 
   HttpSM *sm = (HttpSM *)txnp;
 
-  sm->enable_redirection = (on ? true : false);
-  // Make sure we allow for at least one redirection.
-  if (0 == sm->redirection_tries) {
-    sm->redirection_tries = 1;
+  // This is necessary since we might not have setup these overridable configurations
+  sm->t_state.setup_per_txn_configs();
+
+  if (on) {
+    sm->redirection_tries  = 0;
+    sm->enable_redirection = true;
+    // Make sure we allow for at least one redirection.
+    if (sm->t_state.txn_conf->number_of_redirections <= 0) {
+      sm->t_state.txn_conf->number_of_redirections = 1;
+    }
+  } else {
+    sm->enable_redirection                       = false;
+    sm->t_state.txn_conf->number_of_redirections = 0;
   }
 
   return TS_SUCCESS;
@@ -7516,10 +7528,12 @@ TSHttpTxnRedirectUrlSet(TSHttpTxn txnp, const char *url, const int url_len)
   sm->redirect_url       = (char *)url;
   sm->redirect_url_len   = url_len;
   sm->enable_redirection = true;
+  sm->redirection_tries  = 0;
 
   // Make sure we allow for at least one redirection.
-  if (0 == sm->redirection_tries) {
-    sm->redirection_tries = 1;
+  if (sm->t_state.txn_conf->number_of_redirections <= 0) {
+    sm->t_state.setup_per_txn_configs();
+    sm->t_state.txn_conf->number_of_redirections = 1;
   }
 }
 
@@ -7733,8 +7747,9 @@ TSHttpTxnServerPush(TSHttpTxn txnp, const char *url, int url_len)
   HttpSM *sm          = reinterpret_cast<HttpSM *>(txnp);
   Http2Stream *stream = dynamic_cast<Http2Stream *>(sm->ua_txn);
   if (stream) {
-    Http2ClientSession *parent = static_cast<Http2ClientSession *>(stream->get_parent());
-    if (!parent->is_url_pushed(url, url_len)) {
+    Http2ClientSession *ua_session = static_cast<Http2ClientSession *>(stream->get_parent());
+    SCOPED_MUTEX_LOCK(lock, ua_session->mutex, this_ethread());
+    if (!ua_session->connection_state.is_state_closed() && !ua_session->is_url_pushed(url, url_len)) {
       HTTPHdr *hptr = &(sm->t_state.hdr_info.client_request);
       TSMLoc obj    = reinterpret_cast<TSMLoc>(hptr->m_http);
 
@@ -7742,7 +7757,7 @@ TSHttpTxnServerPush(TSHttpTxn txnp, const char *url, int url_len)
       MIMEField *f    = mime_hdr_field_find(mh, MIME_FIELD_ACCEPT_ENCODING, MIME_LEN_ACCEPT_ENCODING);
       stream->push_promise(url_obj, f);
 
-      parent->add_url_to_pushed_table(url, url_len);
+      ua_session->add_url_to_pushed_table(url, url_len);
     }
   }
   url_obj.destroy();
@@ -8100,6 +8115,9 @@ _conf_to_memberp(TSOverridableConfigKey conf, OverridableHttpConfigParams *overr
   case TS_CONFIG_HTTP_POST_CHECK_CONTENT_LENGTH_ENABLED:
     ret = _memberp_to_generic(&overridableHttpConfig->post_check_content_length_enabled, typep);
     break;
+  case TS_CONFIG_HTTP_REQUEST_BUFFER_ENABLED:
+    ret = _memberp_to_generic(&overridableHttpConfig->request_buffer_enabled, typep);
+    break;
   case TS_CONFIG_HTTP_GLOBAL_USER_AGENT_HEADER:
     ret = _memberp_to_generic(&overridableHttpConfig->global_user_agent_header, typep);
     break;
@@ -8201,6 +8219,9 @@ _conf_to_memberp(TSOverridableConfigKey conf, OverridableHttpConfigParams *overr
     break;
   case TS_CONFIG_HTTP_PARENT_CONNECT_ATTEMPT_TIMEOUT:
     ret = _memberp_to_generic(&overridableHttpConfig->parent_connect_timeout, typep);
+    break;
+  case TS_CONFIG_HTTP_ALLOW_MULTI_RANGE:
+    ret = _memberp_to_generic(&overridableHttpConfig->allow_multi_range, typep);
     break;
   // This helps avoiding compiler warnings, yet detect unhandled enum members.
   case TS_CONFIG_NULL:
@@ -8469,6 +8490,8 @@ TSHttpTxnConfigFind(const char *name, int length, TSOverridableConfigKey *conf, 
   case 35:
     if (!strncmp(name, "proxy.config.http.cache.range.write", length)) {
       cnf = TS_CONFIG_HTTP_CACHE_RANGE_WRITE;
+    } else if (!strncmp(name, "proxy.config.http.allow_multi_range", length)) {
+      cnf = TS_CONFIG_HTTP_ALLOW_MULTI_RANGE;
     }
     break;
 
@@ -8575,6 +8598,8 @@ TSHttpTxnConfigFind(const char *name, int length, TSOverridableConfigKey *conf, 
     case 'd':
       if (!strncmp(name, "proxy.config.http.forward_connect_method", length)) {
         cnf = TS_CONFIG_HTTP_FORWARD_CONNECT_METHOD;
+      } else if (!strncmp(name, "proxy.config.http.request_buffer_enabled", length)) {
+        cnf = TS_CONFIG_HTTP_REQUEST_BUFFER_ENABLED;
       }
       break;
     case 'e':
@@ -9275,12 +9300,13 @@ TSAcceptorGet(TSVConn sslp)
   return ssl_vc ? reinterpret_cast<TSAcceptor>(ssl_vc->accept_object) : nullptr;
 }
 
-extern std::vector<NetAccept *> naVec;
 TSAcceptor
 TSAcceptorGetbyID(int ID)
 {
-  Debug("ssl", "getNetAccept in INK API.cc %p", naVec.at(ID));
-  return reinterpret_cast<TSAcceptor>(naVec.at(ID));
+  SCOPED_MUTEX_LOCK(lock, naVecMutex, this_ethread());
+  auto ret = naVec.at(ID);
+  Debug("ssl", "getNetAccept in INK API.cc %p", ret);
+  return reinterpret_cast<TSAcceptor>(ret);
 }
 
 int
@@ -9293,6 +9319,7 @@ TSAcceptorIDGet(TSAcceptor acceptor)
 int
 TSAcceptorCount()
 {
+  SCOPED_MUTEX_LOCK(lock, naVecMutex, this_ethread());
   return naVec.size();
 }
 
@@ -9567,4 +9594,52 @@ const char *
 TSRegisterProtocolTag(const char *tag)
 {
   return nullptr;
+}
+
+namespace
+{
+// Function that contains the common logic for TSRemapFrom/ToUrlGet().
+//
+TSReturnCode
+remapUrlGet(TSHttpTxn txnp, TSMLoc *urlLocp, URL *(UrlMappingContainer::*mfp)() const)
+{
+  sdk_assert(sdk_sanity_check_txn(txnp) == TS_SUCCESS);
+  sdk_assert(sdk_sanity_check_null_ptr(urlLocp) == TS_SUCCESS);
+  HttpSM *sm = reinterpret_cast<HttpSM *>(txnp);
+
+  URL *url = (sm->t_state.url_map.*mfp)();
+  if (url == nullptr) {
+    return TS_ERROR;
+  }
+
+  auto urlImpl = url->m_url_impl;
+  if (urlImpl == nullptr) {
+    return TS_ERROR;
+  }
+
+  *urlLocp = reinterpret_cast<TSMLoc>(urlImpl);
+
+  return TS_SUCCESS;
+}
+
+} // end anonymous namespace
+
+tsapi TSReturnCode
+TSRemapFromUrlGet(TSHttpTxn txnp, TSMLoc *urlLocp)
+{
+  return remapUrlGet(txnp, urlLocp, &UrlMappingContainer::getFromURL);
+}
+
+tsapi TSReturnCode
+TSRemapToUrlGet(TSHttpTxn txnp, TSMLoc *urlLocp)
+{
+  return remapUrlGet(txnp, urlLocp, &UrlMappingContainer::getToURL);
+}
+
+tsapi TSIOBufferReader
+TSHttpTxnPostBufferReaderGet(TSHttpTxn txnp)
+{
+  sdk_assert(sdk_sanity_check_txn(txnp) == TS_SUCCESS);
+  HttpSM *sm = (HttpSM *)txnp;
+  return (TSIOBufferReader)sm->get_postbuf_clone_reader();
 }

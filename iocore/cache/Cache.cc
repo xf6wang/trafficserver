@@ -607,7 +607,6 @@ CacheProcessor::start_internal(int flags)
   fix                  = !!(flags & PROCESSOR_FIX);
   check                = (flags & PROCESSOR_CHECK) != 0;
   start_done           = 0;
-  int diskok           = 1;
   Span *sd;
 
   /* read the config file and create the data structures corresponding
@@ -652,22 +651,22 @@ CacheProcessor::start_internal(int flags)
     }
 
     if (fd >= 0) {
+      bool diskok = true;
       if (!sd->file_pathname) {
         if (!check) {
           if (ftruncate(fd, blocks * STORE_BLOCK_SIZE) < 0) {
             Warning("unable to truncate cache file '%s' to %" PRId64 " blocks", path, blocks);
-            diskok = 0;
+            diskok = false;
           }
         } else { // read-only mode checks
           struct stat sbuf;
-          diskok = 0;
           if (-1 == fstat(fd, &sbuf)) {
             fprintf(stderr, "Failed to stat cache file for directory %s\n", path);
+            diskok = false;
           } else if (blocks != sbuf.st_size / STORE_BLOCK_SIZE) {
             fprintf(stderr, "Cache file for directory %s is %" PRId64 " bytes, expected %" PRId64 "\n", path, sbuf.st_size,
                     blocks * static_cast<int64_t>(STORE_BLOCK_SIZE));
-          } else {
-            diskok = 1;
+            diskok = false;
           }
         }
       }
@@ -1182,10 +1181,16 @@ Vol::db_check(bool /* fix ATS_UNUSED */)
 static void
 vol_init_data_internal(Vol *d)
 {
-  d->buckets  = ((d->len - (d->start - d->skip)) / cache_config_min_average_object_size) / DIR_DEPTH;
-  d->segments = (d->buckets + (((1 << 16) - 1) / DIR_DEPTH)) / ((1 << 16) / DIR_DEPTH);
-  d->buckets  = (d->buckets + d->segments - 1) / d->segments;
-  d->start    = d->skip + 2 * vol_dirlen(d);
+  // step1: calculate the number of entries.
+  off_t total_entries = (d->len - (d->start - d->skip)) / cache_config_min_average_object_size;
+  // step2: calculate the number of buckets
+  off_t total_buckets = total_entries / DIR_DEPTH;
+  // step3: calculate the number of segments, no semgent has more than 16384 buckets
+  d->segments = (total_buckets + (((1 << 16) - 1) / DIR_DEPTH)) / ((1 << 16) / DIR_DEPTH);
+  // step4: divide total_buckets into segments on average.
+  d->buckets = (total_buckets + d->segments - 1) / d->segments;
+  // step5: set the start pointer.
+  d->start = d->skip + 2 * vol_dirlen(d);
 }
 
 static void
@@ -1276,7 +1281,7 @@ Vol::init(char *s, off_t blocks, off_t dir_skip, bool clear)
   ink_strlcpy(hash_text, seed_str, hash_text_size);
   snprintf(hash_text + hash_seed_size, (hash_text_size - hash_seed_size), " %" PRIu64 ":%" PRIu64 "", (uint64_t)dir_skip,
            (uint64_t)blocks);
-  MD5Context().hash_immediate(hash_id, hash_text, strlen(hash_text));
+  CryptoContext().hash_immediate(hash_id, hash_text, strlen(hash_text));
 
   dir_skip = ROUND_TO_STORE_BLOCK((dir_skip < START_POS ? START_POS : dir_skip));
   path     = ats_strdup(s);
@@ -1321,9 +1326,8 @@ Vol::init(char *s, off_t blocks, off_t dir_skip, bool clear)
   off_t footer_offset = vol_dirlen(this) - footerlen;
   // try A
   off_t as = skip;
-  if (is_debug_tag_set("cache_init")) {
-    Note("reading directory '%s'", hash_text.get());
-  }
+
+  Debug("cache_init", "reading directory '%s'", hash_text.get());
   SET_HANDLER(&Vol::handle_header_read);
   init_info->vol_aio[0].aiocb.aio_offset = as;
   init_info->vol_aio[1].aiocb.aio_offset = as + footer_offset;
@@ -1394,6 +1398,10 @@ Vol::handle_dir_read(int event, void *data)
   if (!(header->magic == VOL_MAGIC && footer->magic == VOL_MAGIC &&
         CACHE_DB_MAJOR_VERSION_COMPATIBLE <= header->version.ink_major && header->version.ink_major <= CACHE_DB_MAJOR_VERSION)) {
     Warning("bad footer in cache directory for '%s', clearing", hash_text.get());
+    Note("VOL_MAGIC %d\n header magic: %d\n footer_magic %d\n CACHE_DB_MAJOR_VERSION_COMPATIBLE %d\n major version %d\n"
+         "CACHE_DB_MAJOR_VERSION %d\n",
+         VOL_MAGIC, header->magic, footer->magic, CACHE_DB_MAJOR_VERSION_COMPATIBLE, header->version.ink_major,
+         CACHE_DB_MAJOR_VERSION);
     Note("clearing cache directory '%s'", hash_text.get());
     clear_dir();
     return EVENT_DONE;
@@ -1666,10 +1674,10 @@ Ldone : {
     dir_clear_range(clear_end, DIR_OFFSET_MAX, this);
     dir_clear_range(1, clear_start, this);
   }
-  if (is_debug_tag_set("cache_init")) {
-    Note("recovery clearing offsets [%" PRIu64 ", %" PRIu64 "] sync_serial %d next %d\n", header->write_pos, recover_pos,
-         header->sync_serial, next_sync_serial);
-  }
+
+  Note("recovery clearing offsets of Vol %s : [%" PRIu64 ", %" PRIu64 "] sync_serial %d next %d\n", hash_text.get(),
+       header->write_pos, recover_pos, header->sync_serial, next_sync_serial);
+
   footer->sync_serial = header->sync_serial = next_sync_serial;
 
   for (int i = 0; i < 3; i++) {
@@ -1769,7 +1777,9 @@ Vol::handle_header_read(int event, void *data)
       io.aiocb.aio_offset = skip + vol_dirlen(this);
       ink_assert(ink_aio_read(&io));
     } else {
-      Note("no good directory, clearing '%s'", hash_text.get());
+      Note("no good directory, clearing '%s' since sync_serials on both A and B copies are invalid", hash_text.get());
+      Note("Header A: %d\nFooter A: %d\n Header B: %d\n Footer B %d\n", hf[0]->sync_serial, hf[1]->sync_serial, hf[2]->sync_serial,
+           hf[3]->sync_serial);
       clear_dir();
       delete init_info;
       init_info = nullptr;
@@ -2348,7 +2358,7 @@ CacheVC::handleReadDone(int event, Event *e)
 #endif
 
     if (is_debug_tag_set("cache_read")) {
-      char xt[33];
+      char xt[CRYPTO_HEX_SIZE];
       Debug("cache_read", "Read complete on fragment %s. Length: data payload=%d this fragment=%d total doc=%" PRId64 " prefix=%d",
             doc->key.toHexStr(xt), doc->data_len(), doc->len, doc->total_len, doc->prefix_len());
     }

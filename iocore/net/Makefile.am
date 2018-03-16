@@ -27,6 +27,7 @@ AM_CPPFLAGS += \
   -I$(abs_top_srcdir)/mgmt \
   -I$(abs_top_srcdir)/mgmt/utils \
   -I$(abs_top_srcdir)/proxy/http \
+  $(TS_INCLUDES) \
   @OPENSSL_INCLUDES@
 
 TESTS = $(check_PROGRAMS)
@@ -154,11 +155,6 @@ libinknet_a_SOURCES = \
   UnixUDPConnection.cc \
   UnixUDPNet.cc \
   SSLDynlock.cc
-
-#test_UNUSED_SOURCES = \
-#  NetTest-http-server.c \
-#  test_I_Net.cc \
-#  test_P_Net.cc
 
 if BUILD_TESTS
   libinknet_a_SOURCES += \

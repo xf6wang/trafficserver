@@ -28,7 +28,7 @@
 #include "ts/ink_defs.h"
 #include "ts/CryptoHash.h"
 
-class MD5Context : public CryptoContext
+class MD5Context : public ats::CryptoContextBase
 {
 protected:
   MD5_CTX _ctx;

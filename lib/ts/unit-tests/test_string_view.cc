@@ -19,6 +19,7 @@
 #include "catch.hpp"
 
 #include "string_view.h"
+#include <functional>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -255,12 +256,12 @@ TEST_CASE("Access & iterators", "[string_view] [access]")
 
     REQUIRE(*sv.begin() == 'a');
     REQUIRE(*sv.cbegin() == 'a');
-    REQUIRE(*sv.end() == '\0');
-    REQUIRE(*sv.cend() == '\0');
+    REQUIRE(*(--sv.end()) == 'e');
+    REQUIRE(*(--sv.cend()) == 'e');
     REQUIRE(*sv.rbegin() == 'e');
     REQUIRE(*sv.crbegin() == 'e');
-    REQUIRE(*sv.rend() == '\0');
-    REQUIRE(*sv.crend() == '\0');
+    REQUIRE(*(--sv.rend()) == 'a');
+    REQUIRE(*(--sv.crend()) == 'a');
 
     int n = 0;
     for (auto it : sv) {
@@ -537,5 +538,13 @@ TEST_CASE("Find", "[string_view] [find]")
     REQUIRE(sv.find_last_not_of("abcdxyz", 1, 0) == 1);
     REQUIRE(sv.find_last_not_of("abcdxyz", 1, 5) == npos);
     REQUIRE(sv.find_last_not_of("aaaaaaaa", 1, 5) == 1);
+  }
+
+  SECTION("hash")
+  {
+    ts::string_view sv1("hello");
+    ts::string_view sv2("hello world", 5);
+    std::hash<ts::string_view> h;
+    REQUIRE(h(sv1) == h(sv2));
   }
 }

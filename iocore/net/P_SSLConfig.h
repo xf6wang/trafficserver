@@ -86,7 +86,7 @@ struct SSLConfigParams : public ConfigInfo {
   int8_t clientVerify;
   int client_verify_depth;
   long ssl_ctx_options;
-  long ssl_client_ctx_protocols;
+  long ssl_client_ctx_options;
 
   static int ssl_maxrecord;
   static bool ssl_allow_client_renegotiation;
@@ -111,6 +111,9 @@ struct SSLConfigParams : public ConfigInfo {
 
   static init_ssl_ctx_func init_ssl_ctx_cb;
   static load_ssl_file_func load_ssl_file_cb;
+
+  static int async_handshake_enabled;
+  static char *engine_conf_file;
 
   SSL_CTX *client_ctx;
 

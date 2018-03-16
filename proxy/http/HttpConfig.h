@@ -211,6 +211,9 @@ enum {
   http_err_client_abort_count_stat,
   http_err_client_abort_user_agent_bytes_stat,
   http_err_client_abort_origin_server_bytes_stat,
+  http_err_client_read_error_count_stat,
+  http_err_client_read_error_user_agent_bytes_stat,
+  http_err_client_read_error_origin_server_bytes_stat,
   http_err_connect_fail_count_stat,
   http_err_connect_fail_user_agent_bytes_stat,
   http_err_connect_fail_origin_server_bytes_stat,
@@ -432,6 +435,7 @@ struct OverridableHttpConfigParams {
       cache_required_headers(2),
       cache_range_lookup(1),
       cache_range_write(0),
+      allow_multi_range(0),
       cache_enable_default_vary_headers(0),
       ignore_accept_mismatch(0),
       ignore_accept_language_mismatch(0),
@@ -446,6 +450,7 @@ struct OverridableHttpConfigParams {
       parent_failures_update_hostdb(0),
       cache_open_write_fail_action(0),
       post_check_content_length_enabled(1),
+      request_buffer_enabled(0),
       ssl_client_verify_server(0),
       redirect_use_orig_cache_key(0),
       number_of_redirections(0),
@@ -584,6 +589,7 @@ struct OverridableHttpConfigParams {
   MgmtByte cache_required_headers;
   MgmtByte cache_range_lookup;
   MgmtByte cache_range_write;
+  MgmtByte allow_multi_range;
 
   MgmtByte cache_enable_default_vary_headers;
 
@@ -618,6 +624,11 @@ struct OverridableHttpConfigParams {
   // Check Post request //
   ////////////////////////
   MgmtByte post_check_content_length_enabled;
+
+  ////////////////////////////////////////////////
+  // Buffer post body before connecting servers //
+  ////////////////////////////////////////////////
+  MgmtByte request_buffer_enabled;
 
   /////////////////////////////
   // server verification mode//

@@ -44,6 +44,7 @@
 #include <limits.h>
 #include <sys/mman.h>
 #include <cmath>
+#include <openssl/md5.h>
 
 #include <inttypes.h>
 

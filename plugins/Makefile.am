@@ -56,6 +56,7 @@ include experimental/collapsed_forwarding/Makefile.inc
 include experimental/custom_redirect/Makefile.inc
 include experimental/epic/Makefile.inc
 include experimental/escalate/Makefile.inc
+include experimental/fq_pacing/Makefile.inc
 include experimental/geoip_acl/Makefile.inc
 include experimental/header_freq/Makefile.inc
 include experimental/header_normalize/Makefile.inc
@@ -74,6 +75,7 @@ include experimental/sslheaders/Makefile.inc
 include experimental/stale_while_revalidate/Makefile.inc
 include experimental/stream_editor/Makefile.inc
 include experimental/system_stats/Makefile.inc
+include experimental/tls_bridge/Makefile.inc
 include experimental/ts_lua/Makefile.inc
 include experimental/url_sig/Makefile.inc
 

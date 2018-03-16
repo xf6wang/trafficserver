@@ -20,7 +20,7 @@ include $(top_srcdir)/build/tidy.mk
 
 library_includedir=$(includedir)/ts
 
-library_include_HEADERS = apidefs.h
+library_include_HEADERS = apidefs.h string_view.h
 
 noinst_PROGRAMS = mkdfa CompileParseRules
 check_PROGRAMS = test_tsutil test_arena test_atomic test_freelist test_geometry test_List test_Map test_Vec test_X509HostnameValidator test_Scalar test_tslib
@@ -31,7 +31,11 @@ TESTS = $(check_PROGRAMS)
 
 lib_LTLIBRARIES = libtsutil.la
 
-AM_CPPFLAGS += -I$(abs_top_srcdir)/lib
+AM_CPPFLAGS += \
+  $(iocore_include_dirs) \
+  -I$(abs_top_srcdir)/lib \
+  -I$(abs_top_srcdir)/lib/records \
+  $(TS_INCLUDES)
 
 libtsutil_la_LDFLAGS = -no-undefined -version-info @TS_LIBTOOL_VERSION@
 libtsutil_la_LIBADD = \
@@ -56,6 +60,8 @@ libtsutil_la_SOURCES = \
   ConsistentHash.h \
   ContFlags.cc \
   ContFlags.h \
+  CryptoHash.cc \
+  CryptoHash.h \
   defalloc.h \
   Diags.cc \
   Diags.h \
@@ -155,6 +161,8 @@ libtsutil_la_SOURCES = \
   IpMapConf.h \
   IpMap.h \
   I_Version.h \
+  JeAllocator.h \
+  JeAllocator.cc \
   Layout.cc \
   List.h \
   llqueue.cc \
@@ -164,6 +172,7 @@ libtsutil_la_SOURCES = \
   MatcherUtils.h \
   MMH.cc \
   MMH.h \
+  MT_hashtable.h \
   ParseRules.cc \
   ParseRules.h \
   PriorityQueue.h \
@@ -249,13 +258,14 @@ test_tslib_CPPFLAGS = $(AM_CPPFLAGS)\
 
 # add you catch based test file here for tslib
 test_tslib_CXXFLAGS = -Wno-array-bounds $(AM_CXXFLAGS)
-test_tslib_LDADD = libtsutil.la
+test_tslib_LDADD = libtsutil.la $(top_builddir)/iocore/eventsystem/libinkevent.a
 test_tslib_SOURCES = \
 	unit-tests/unit_test_main.cc \
 	unit-tests/test_BufferWriter.cc \
 	unit-tests/test_ink_inet.cc \
 	unit-tests/test_IpMap.cc \
 	unit-tests/test_layout.cc \
+	unit-tests/test_MT_hashtable.cc \
 	unit-tests/test_string_view.cc \
 	unit-tests/test_TextView.cc
 

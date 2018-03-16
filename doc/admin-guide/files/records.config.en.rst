@@ -1654,7 +1654,15 @@ Proxy User Variables
    :reloadable:
    :overridable:
 
-   When enabled (``1``), Traffic Server inserts ``Client-IP`` headers to retain the client IP address.
+   Specifies whether Traffic Server inserts ``Client-IP`` headers to retain the client IP address:
+
+   ===== ======================================================================
+   Value Description
+   ===== ======================================================================
+   ``0`` Don't insert the ``Client-ip`` header
+   ``1`` Insert the ``Client-ip`` header, but only if the UA did not send one
+   ``2`` Always insert the ``Client-ip`` header
+   ===== ======================================================================
 
 .. ts:cv:: CONFIG proxy.config.http.anonymize_other_header_list STRING NULL
    :reloadable:
@@ -1738,6 +1746,22 @@ Security
    value will limit the size of post bodies. If a request is received with a
    post body larger than this limit the response will be terminated with
    413 - Request Entity Too Large and logged accordingly.
+
+.. ts:cv:: CONFIG proxy.config.http.allow_multi_range INT 0
+   :reloadable:
+   :overridable:
+
+   This option allows the administrator to configure different behavior and
+   handling of requests with multiple ranges in the ``Range`` header.
+
+   ===== ======================================================================
+   Value Description
+   ===== ======================================================================
+   ``0`` Do not allow multiple ranges, effectively ignoring the ``Range`` header
+   ``1`` Allows multiple ranges. This can be potentially dangerous since well
+         formed requests can cause excessive resource consumption on the server.
+   ``2`` Similar to 0, except return a 416 error code and no response body.
+   ===== ======================================================================
 
 Cache Control
 =============
@@ -3333,9 +3357,7 @@ SSL Termination
 
 .. ts:cv:: CONFIG proxy.config.ssl.wire_trace_server_name STRING NULL
 
-   This specifies the server name for which wire_traces should be
-   printed. This only works if traffic_server is built with
-   TS_USE_TLS_SNI flag set to true.
+   This specifies the server name for which wire_traces should be printed.
 
 Client-Related Configuration
 ----------------------------
@@ -3381,6 +3403,37 @@ Client-Related Configuration
 
    Specifies the location of the certificate authority file against
    which the origin server will be verified.
+
+.. ts:cv:: CONFIG proxy.config.ssl.client.SSLv3 INT 0
+
+   Enables (``1``) or disables (``0``) SSLv3 in the ATS client context. Disabled by default
+
+.. ts:cv:: CONFIG proxy.config.ssl.client.TLSv1 INT 1
+
+   Enables (``1``) or disables (``0``) TLSv1 in the ATS client context. If not specified, enabled by default
+
+.. ts:cv:: CONFIG proxy.config.ssl.client.TLSv1_1 INT 1
+
+   Enables (``1``) or disables (``0``) TLSv1_1 in the ATS client context. If not specified, enabled by default
+
+.. ts:cv:: CONFIG proxy.config.ssl.client.TLSv1_2 INT 1
+
+   Enables (``1``) or disables (``0``) TLSv1_2 in the ATS client context. If not specified, enabled by default
+
+.. ts:cv:: CONFIG proxy.config.ssl.async.handshake.enabled INT 0
+
+   Enables the use of openssl async job during the TLS handshake.  Traffic
+   Server must be build against openssl 1.1 or greater or this to take affect.
+   Can be useful if using a crypto engine that communicates off chip.  The
+   thread will be rescheduled for other work until the crypto engine operation
+   completes. A test crypto engine that inserts a 5 second delay on private key
+   operations can be found at :ts:git:`contrib/openssl/async_engine.c`.
+   
+.. ts:cv:: CONFIG proxy.config.ssl.engine.conf_file STRING NULL
+
+   Specify the location of the openssl config file used to load dynamic crypto
+   engines. This setting assumes an absolute path.  An example config file is at
+   :ts:git:`contrib/openssl/load_engine.cnf`.
 
 OCSP Stapling Configuration
 ===========================

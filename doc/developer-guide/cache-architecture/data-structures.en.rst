@@ -85,28 +85,32 @@ Data Structures
 
    * Timestamps for request and response from :term:`origin server`.
 
-.. class:: EvacuationBlock
-
-    Record for evacuation.
-
 .. class:: Vol
 
    This represents a :term:`storage unit` inside a :term:`cache volume`.
 
-   .. member:: off_t Vol::segments
+   .. cpp:member:: off_t data_blocks
+
+      The number of blocks of storage in the stripe.
+
+   .. cpp:member:: int aggWrite(int event, void * e)
+
+      Schedule the aggregation buffer to be written to disk.
+      
+   .. member:: off_t segments
 
       The number of segments in the volume. This will be roughly the total
       number of entries divided by the number of entries in a segment. It will
       be rounded up to cover all entries.
 
-   .. member:: off_t Vol::buckets
+   .. member:: off_t buckets
 
       The number of buckets in the volume. This will be roughly the number of
       entries in a segment divided by ``DIR_DEPTH``. For currently defined
       values this is around 16,384 (2^16 / 4). Buckets are used as the targets
       of the index hash.
 
-   .. member:: DLL\<EvacuationBlock\> Vol::evacuate
+   .. member:: DLL<EvacuationBlock> evacuate
 
       Array of of :class:`EvacuationBlock` buckets. This is sized so there
       is one bucket for every evacuation span.
@@ -121,52 +125,48 @@ Data Structures
          from :arg:`low` to :arg:`high`. Return ``0`` if no evacuation was started,
          non-zero otherwise.
 
-.. class:: CacheVol
-
-   A :term:`cache volume` as described in :file:`volume.config`.
-
 .. class:: Doc
 
    Defined in :ts:git:`iocore/cache/P_CacheVol.h`.
 
-   .. member:: uint32_t Doc::magic
+   .. member:: uint32_t magic
 
       Validity check value. Set to ``DOC_MAGIC`` for a valid document.
 
-   .. member:: uint32_t Doc::len
+   .. member:: uint32_t len
 
       The length of this segment including the header length, fragment table,
       and this structure.
 
-   .. member:: uint64_t Doc::total_len
+   .. member:: uint64_t total_len
 
       Total length of the entire document not including meta data but including
       headers.
 
-   .. member:: INK_MD5 Doc::first_key
+   .. member:: INK_MD5 first_key
 
       First index key in the document (the index key used to locate this object
       in the volume index).
 
-   .. member:: INK_MD5 Doc::key
+   .. member:: INK_MD5 key
 
       The index key for this fragment. Fragment keys are computationally
       chained so that the key for the next and previous fragments can be
       computed from this key.
 
-   .. member:: uint32_t Doc::hlen
+   .. member:: uint32_t hlen
 
       Document header (metadata) length. This is not the length of the HTTP
       headers.
 
-   .. member:: uint8_t Doc::ftype
+   .. member:: uint8_t ftype
 
       Fragment type. Currently only ``CACHE_FRAG_TYPE_HTTP`` is used. Other
       types may be used for cache extensions if those are ever implemented.
 
-   .. member:: uint24_t Doc::flen
+   .. member:: uint24_t flen
 
-      Fragment table length, if any. Only the first ``Doc`` in an object should
+      Fragment table length, if any. Only the first :class:`Doc` in an object should
       contain a fragment table.
 
       The fragment table is a list of offsets relative to the HTTP content (not
@@ -180,11 +180,11 @@ Data Structures
 
       Removed as of version 3.3.0. [#fragment-offset-table]_
 
-   .. member:: uint32_t Doc::sync_serial
+   .. member:: uint32_t sync_serial
 
       Unknown.
 
-   .. member:: uint32_t Doc::write_serial
+   .. member:: uint32_t write_serial
 
       Unknown.
 
@@ -231,11 +231,11 @@ Data Structures
 
 .. class:: DiskVolBlock
 
-   A description of a span block. This is a serialized data structure.
+   A description of a span stripe (Vol) block . This is a serialized data structure.
 
    .. member:: uint64_t offset
 
-      Offset in the span of the start of the span block, in bytes.
+      Offset in the span of the start of the span stripe (Vol) block, in bytes.
 
    .. member:: uint64_t len
 
@@ -300,6 +300,118 @@ Data Structures
 
       An array of directory entry indices. Each element is the directory entry of the start of the free list
       for a segment, in the same order as the segments in the directory.
+
+
+.. class:: DiskVolBlockQueue
+
+   .. member:: DiskVolBlock* b
+   
+   .. member:: int new_block
+
+      Indicates if this is a new stripe rather than an existing one. In case a stripe is new ATS decides to clear that stripe(:class:`Vol`)
+
+   .. member:: LINK<DiskVolBlockQueue> link
+
+
+.. class:: DiskVol
+
+   Describes the Disk that contains the stripe identified by vol_number. This class also contains the queue
+   containing all the DiskVolBlock
+
+   .. member:: int num_volblocks
+
+      Number of blocks in the stripe identified by vol_number
+
+   .. member:: int vol_number
+
+      Identification number of the stripe (:class:`Vol`)
+
+   .. member:: uint64_t size
+
+      Size of the stripe
+
+   .. member:: CacheDisk* disk
+
+      The disk containing the stripe
+
+   .. member:: Queue<DiskVolBlockQueue> dpb_queue
+      
+.. enum:: CacheType
+
+   .. enumerator:: HTTP
+   
+   .. enumerator:: Stream
+
+.. class:: CacheVol
+
+   A :term:`cache volume` as described in :file:`volume.config`. This class represents a single volume. :class:`CacheVol` comprises of stripes spread across Spans(disks)
+
+   .. member:: int volume_number
+      
+      indentification number of this volume
+
+   .. member:: int scheme
+
+      An enumeration of value :enumerator:`CacheType::HTTP` or :enumerator:`CacheType::Stream`.
+
+   .. member:: off_t size
+
+
+   .. member:: int num_vols
+
+      Number of stripes(:class:`Vol`) contained in this volume
+
+   .. member:: Vol** vols
+      
+      :class:`Vol` represents a single stripe in the disk. vols contains all the stripes this volume is made up of
+   
+   .. member:: DiskVol** disk_vols
+
+      disk_vols contain references to the disks of all the stripes in this volume
+      
+   .. member:: LINK<CacheVol> link
+
+   .. member:: RecRawStatBlock vol_rsb
+      
+      per volume stat
+
+.. class:: ConfigVol
+
+   This class represents an individual volume.
+
+   .. member:: int number
+
+      Identification number of the volume
+
+   .. member:: CacheType scheme
+
+   .. member:: off_t size
+   
+   .. member:: bool in_percent
+
+      Used as an indicator if the volume is part of the overall volumes created by ATS
+
+   .. member:: int percent
+      
+   .. member:: CacheVol* cachep
+
+   .. member:: LINK<ConfigVol> link
+
+.. class:: ConfigVolumes
+
+    .. member:: int num_volumes
+
+       Total number of volumes specified in volume.config
+
+    .. member:: int num_http_volumes
+
+       Total number of volumes scpecified in volume.config for HTTP scheme
+
+    .. member:: int num_stream_volumes
+
+       Total number of volumes scpecified in volume.config for stream
+
+    .. member:: Queue<ConfigVol> cp_queue
 
 .. rubric:: Footnotes
 

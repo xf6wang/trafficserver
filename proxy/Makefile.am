@@ -42,6 +42,7 @@ AM_CPPFLAGS += \
   -I$(abs_top_srcdir)/mgmt \
   -I$(abs_top_srcdir)/mgmt/utils \
   -I$(abs_top_srcdir)/lib \
+  $(TS_INCLUDES) \
   @OPENSSL_INCLUDES@
 
 # NOTE: it is safe to use AM_LDFLAGS here because we are only building executables. If we start
@@ -136,6 +137,8 @@ traffic_server_SOURCES = \
   Crash.cc \
   EventName.cc \
   FetchSM.cc \
+  HostStatus.cc \
+  HostStatus.h \
   IPAllow.cc \
   IPAllow.h \
   InkAPI.cc \
@@ -148,7 +151,7 @@ traffic_server_SOURCES = \
   ParentConsistentHash.h \
   ParentRoundRobin.cc \
   ParentRoundRobin.h \
-	ParentSelectionStrategy.cc \
+  ParentSelectionStrategy.cc \
   ParentSelection.cc \
   ParentSelection.h \
   Plugin.cc \
