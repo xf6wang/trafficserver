@@ -41,7 +41,7 @@
 
 #include "MgmtDefs.h"
 #include "MgmtMarshall.h"
-#include "MgmtCallback.h"
+#include "MgmtHashTable.h"
 
 /*******************************************
  * used by LocalManager and in Proxy Main. *
@@ -116,7 +116,7 @@ public:
 
 protected:
   LLQ *mgmt_event_queue;
-  MgmtCallbackSystem *mgmt_callback_handler;
+  LocalMgmtHashTable *mgmt_callback_handler;
 
   void sendMgmtEvent(int msg_id, char *data_raw, int data_len);
 private:

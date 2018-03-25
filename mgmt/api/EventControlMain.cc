@@ -225,6 +225,208 @@ apiEventCallback(alarm_t newAlarm, const char * /* ip ATS_UNUSED */, const char 
   return;
 }
 
+/*********************************************************************
+ * event_callback_main
+ *
+ * This function is run as a thread in WebIntrMain.cc that listens on a
+ * specified socket. It loops until Traffic Manager dies.
+ * In the loop, it just listens on a socket, ready to accept any connections,
+ * until receives a request from the remote API client. Parse the request
+ * to determine which CoreAPI call to make.
+ *********************************************************************/
+void *
+event_callback_main(void *arg)
+{
+  int ret;
+  int *socket_fd;
+  int con_socket_fd; // main socket for listening to new connections
+
+  socket_fd     = (int *)arg;
+  con_socket_fd = *socket_fd; // the socket for event callbacks
+
+  Debug("event", "[event_callback_main] listen on socket = %d", con_socket_fd);
+
+  // initialize queue for accepted con
+  accepted_clients = ink_hash_table_create(InkHashTableKeyType_Word);
+  if (!accepted_clients) {
+    return nullptr;
+  }
+  // initialize queue for holding mgmt events
+  if ((ret = init_mgmt_events()) != TS_ERR_OKAY) {
+    ink_hash_table_destroy(accepted_clients);
+    return nullptr;
+  }
+  // register callback with alarms processor
+  lmgmt->alarm_keeper->registerCallback(apiEventCallback);
+
+  // now we can start listening, accepting connections and servicing requests
+  int new_con_fd; // new connection fd when socket accepts connection
+
+  fd_set selectFDs;                    // for select call
+  InkHashTableEntry *con_entry;        // used to obtain fd to alarms mapping
+  EventClientT *client_entry;          // an entry of fd to alarms mapping
+  InkHashTableIteratorState con_state; // used to iterate through hash table
+  int fds_ready;                       // return value for select go here
+  struct timeval timeout;
+
+  while (true) {
+    // LINUX fix: to prevent hard-spin reset timeout on each loop
+    timeout.tv_sec  = 1;
+    timeout.tv_usec = 0;
+
+    FD_ZERO(&selectFDs);
+
+    if (con_socket_fd >= 0) {
+      FD_SET(con_socket_fd, &selectFDs);
+      Debug("event", "[event_callback_main] add fd %d to select set", con_socket_fd);
+    }
+    // see if there are more fd to set
+    con_entry = ink_hash_table_iterator_first(accepted_clients, &con_state);
+
+    // iterate through all entries in hash table
+    while (con_entry) {
+      client_entry = (EventClientT *)ink_hash_table_entry_value(accepted_clients, con_entry);
+      if (client_entry->fd >= 0) { // add fd to select set
+        FD_SET(client_entry->fd, &selectFDs);
+      }
+      con_entry = ink_hash_table_iterator_next(accepted_clients, &con_state);
+    }
+
+    // select call - timeout is set so we can check events at regular intervals
+    fds_ready = mgmt_select(FD_SETSIZE, &selectFDs, (fd_set *)nullptr, (fd_set *)nullptr, &timeout);
+
+    // check return
+    if (fds_ready > 0) {
+      // we got connections or requests!
+
+      // first check for connections!
+      if (con_socket_fd >= 0 && FD_ISSET(con_socket_fd, &selectFDs)) {
+        fds_ready--;
+
+        // create a new instance of the fd to alarms registered mapping
+        EventClientT *new_client_con = new_event_client();
+
+        if (!new_client_con) {
+          // Debug ("TS_Control_Main", "can't create new EventClientT for new connection");
+        } else {
+          // accept connection
+          socklen_t addr_len = (sizeof(struct sockaddr));
+          new_con_fd         = mgmt_accept(con_socket_fd, new_client_con->adr, &addr_len);
+          new_client_con->fd = new_con_fd;
+          ink_hash_table_insert(accepted_clients, (char *)&new_client_con->fd, new_client_con);
+          Debug("event", "[event_callback_main] Accept new connection: fd=%d", new_con_fd);
+        }
+      } // end if (new_con_fd >= 0 && FD_ISSET(new_con_fd, &selectFDs))
+
+      // some other file descriptor; for each one, service request
+      if (fds_ready > 0) { // RECEIVED A REQUEST from remote API client
+        // see if there are more fd to set - iterate through all entries in hash table
+        con_entry = ink_hash_table_iterator_first(accepted_clients, &con_state);
+        while (con_entry) {
+          client_entry = (EventClientT *)ink_hash_table_entry_value(accepted_clients, con_entry);
+          // got information check
+          if (client_entry->fd && FD_ISSET(client_entry->fd, &selectFDs)) {
+            // SERVICE REQUEST - read the op and message into a buffer
+            // clear the fields first
+            void *req;
+            size_t reqlen;
+
+            ret = preprocess_msg(client_entry->fd, &req, &reqlen);
+            if (ret == TS_ERR_NET_READ || ret == TS_ERR_NET_EOF) { // preprocess_msg FAILED!
+              Debug("event", "[event_callback_main] preprocess_msg FAILED; skip!");
+              remove_event_client(client_entry, accepted_clients);
+              con_entry = ink_hash_table_iterator_next(accepted_clients, &con_state);
+              continue;
+            }
+
+            ret = handle_event_message(client_entry, req, reqlen);
+            ats_free(req);
+
+            if (ret == TS_ERR_NET_WRITE || ret == TS_ERR_NET_EOF) {
+              Debug("event", "[event_callback_main] ERROR: handle_control_message");
+              remove_event_client(client_entry, accepted_clients);
+              con_entry = ink_hash_table_iterator_next(accepted_clients, &con_state);
+              continue;
+            }
+
+          } // end if(client_entry->fd && FD_ISSET(client_entry->fd, &selectFDs))
+
+          con_entry = ink_hash_table_iterator_next(accepted_clients, &con_state);
+        } // end while (con_entry)
+      }   // end if (fds_ready > 0)
+
+    } // end if (fds_ready > 0)
+
+    // ------------ service loop is done, check for events now -------------
+    // for each event in the mgmt_events list, uses the event id to check the
+    // events_registered queue for each client connection to see if that client
+    // has a callback registered for that event_id
+
+    TSMgmtEvent *event;
+
+    if (!mgmt_events || queue_is_empty(mgmt_events)) { // no events to process
+      // fprintf(stderr, "[event_callback_main] NO EVENTS TO PROCESS\n");
+      Debug("event", "[event_callback_main] NO EVENTS TO PROCESS");
+      continue;
+    }
+    // iterate through each event in mgmt_events
+    while (!queue_is_empty(mgmt_events)) {
+      ink_mutex_acquire(&mgmt_events_lock);        // acquire lock
+      event = (TSMgmtEvent *)dequeue(mgmt_events); // get what we want
+      ink_mutex_release(&mgmt_events_lock);        // release lock
+
+      if (!event) {
+        continue;
+      }
+
+      // fprintf(stderr, "[event_callback_main] have an EVENT TO PROCESS\n");
+
+      // iterate through all entries in hash table, if any
+      con_entry = ink_hash_table_iterator_first(accepted_clients, &con_state);
+      while (con_entry) {
+        client_entry = (EventClientT *)ink_hash_table_entry_value(accepted_clients, con_entry);
+        if (client_entry->events_registered[event->id]) {
+          OpType optype           = OpType::EVENT_NOTIFY;
+          MgmtMarshallString name = event->name;
+          MgmtMarshallString desc = event->description;
+
+          ret = send_mgmt_request(client_entry->fd, OpType::EVENT_NOTIFY, &optype, &name, &desc);
+          if (ret != TS_ERR_OKAY) {
+            Debug("event", "sending even notification to fd [%d] failed.", client_entry->fd);
+          }
+        }
+        // get next client connection, if any
+        con_entry = ink_hash_table_iterator_next(accepted_clients, &con_state);
+      } // end while(con_entry)
+
+      // now we can delete the event
+      // fprintf(stderr, "[event_callback_main] DELETE EVENT\n");
+      TSEventDestroy(event);
+    } // end while (!queue_is_empty)
+
+  } // end while (1)
+
+  // delete tables
+  delete_mgmt_events();
+
+  // iterate through hash table; close client socket connections and remove entry
+  con_entry = ink_hash_table_iterator_first(accepted_clients, &con_state);
+  while (con_entry) {
+    client_entry = (EventClientT *)ink_hash_table_entry_value(accepted_clients, con_entry);
+    if (client_entry->fd >= 0) {
+      close_socket(client_entry->fd);
+    }
+    ink_hash_table_delete(accepted_clients, (char *)&client_entry->fd); // remove binding
+    delete_event_client(client_entry);                                  // free ClientT
+    con_entry = ink_hash_table_iterator_next(accepted_clients, &con_state);
+  }
+  // all entries should be removed and freed already
+  ink_hash_table_destroy(accepted_clients);
+
+  ink_thread_exit(nullptr);
+  return nullptr;
+}
+
 
 /*-------------------------------------------------------------------------
                              HANDLER FUNCTIONS

@@ -24,9 +24,9 @@
 #include "ts/ink_platform.h"
 #include "ts/ink_hash_table.h"
 #include "ts/ink_memory.h"
-#include "MgmtCallback.h"
+#include "MgmtHashTable.h"
 
-MgmtCallbackSystem::MgmtCallbackSystem()
+MgmtHashTable::MgmtHashTable()
 {
     /* Setup the event queue and callback tables */
     mgmt_incoming_queue    = create_queue();
@@ -34,7 +34,7 @@ MgmtCallbackSystem::MgmtCallbackSystem()
     ink_mutex_init(&mutex);
 }
 
-MgmtCallbackSystem::~MgmtCallbackSystem()
+MgmtHashTable::~MgmtHashTable()
 {
     InkHashTableEntry *entry;
     InkHashTableIteratorState iterator_state;
@@ -74,7 +74,7 @@ MgmtCallbackSystem::~MgmtCallbackSystem()
  *               or     value
  */
 int
-MgmtCallbackSystem::registerCallback(int msg_id, MgmtCallback cb, void *opaque_cb_data)
+MgmtHashTable::registerCallback(int msg_id, MgmtCallback cb, void *opaque_cb_data)
 {
     MgmtCallbackList *cb_list;
     InkHashTableValue hash_value;
@@ -108,7 +108,7 @@ MgmtCallbackSystem::registerCallback(int msg_id, MgmtCallback cb, void *opaque_c
 }
 
 int
-MgmtCallbackSystem::removeCallback(int msg_id, MgmtCallback cb)
+MgmtHashTable::removeCallback(int msg_id, MgmtCallback cb)
 {
     MgmtCallbackList *cb_list;
     InkHashTableValue hash_value;
@@ -144,7 +144,7 @@ MgmtCallbackSystem::removeCallback(int msg_id, MgmtCallback cb)
 }
 
 void
-MgmtCallbackSystem::triggerCallback(Args... args) 
+LocalMgmtHashTable::triggerCallback(int msg_id, char *data_raw, int data_len) 
 {
     if(ink_mutex_try_acquire(&mutex)) {
         // send out message
@@ -177,7 +177,7 @@ MgmtCallbackSystem::triggerCallback(Args... args)
 }
 
 void 
-MgmtCallbackSystem::executeCallback(int msg_id, char *data_raw, int data_len)
+LocalMgmtHashTable::executeCallback(int msg_id, char *data_raw, int data_len)
 {
     InkHashTableValue hash_value;
 
@@ -188,4 +188,3 @@ MgmtCallbackSystem::executeCallback(int msg_id, char *data_raw, int data_len)
         }
     }
 }
-

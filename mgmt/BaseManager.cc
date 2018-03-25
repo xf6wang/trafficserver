@@ -39,7 +39,7 @@
 BaseManager::BaseManager()
 {
   mgmt_event_queue    = create_queue();
-  mgmt_callback_handler = new MgmtCallbackSystem();
+  mgmt_callback_handler = new LocalMgmtHashTable();
 } /* End BaseManager::BaseManager */
 
 BaseManager::~BaseManager()
