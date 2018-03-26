@@ -38,12 +38,12 @@
 #include "EventControlMain.h"
 #include "CoreAPI.h"
 #include "NetworkUtilsLocal.h"
-#include "NetworkMessage.h"
 
 // variables that are very important
 ink_mutex mgmt_events_lock;
 LLQ *mgmt_events;
 InkHashTable *accepted_clients; // list of all accepted client connections
+EventHashTable *callbacks;
 
 static TSMgmtError handle_event_message(EventClientT *client, void *req, size_t reqlen);
 
@@ -225,6 +225,101 @@ apiEventCallback(alarm_t newAlarm, const char * /* ip ATS_UNUSED */, const char 
   return;
 }
 
+
+/*-------------------------------------------------------------------------
+                             HANDLER FUNCTIONS
+ --------------------------------------------------------------------------*/
+
+/**************************************************************************
+ * handle_event_reg_callback
+ *
+ * purpose: handles request to register a callback for a specific event (or all events)
+ * input: client - the client currently reading the msg from
+ *        req    - the event_name
+ * output: TS_ERR_xx
+ * note: the req should be the event name; does not send a reply to client
+ *************************************************************************/
+static TSMgmtError
+handle_event_reg_callback(EventClientT *client, void *req, size_t reqlen)
+{
+  MgmtMarshallInt optype;
+  MgmtMarshallString name = nullptr;
+  TSMgmtError ret;
+
+  ret = recv_mgmt_request(req, reqlen, OpType::EVENT_REG_CALLBACK, &optype, &name);
+  if (ret != TS_ERR_OKAY) {
+    goto done;
+  }
+
+  // mark the specified alarm as "wanting to be notified" in the client's alarm_registered list
+  if (strlen(name) == 0) { // mark all alarms
+    for (bool &i : client->events_registered) {
+      i = true;
+    }
+  } else {
+    int id = get_event_id(name);
+    if (id < 0) {
+      ret = TS_ERR_FAIL;
+      goto done;
+    }
+
+    client->events_registered[id] = true;
+  }
+
+  ret = TS_ERR_OKAY;
+
+done:
+  ats_free(name);
+  return ret;
+}
+
+/**************************************************************************
+ * handle_event_unreg_callback
+ *
+ * purpose: handles request to unregister a callback for a specific event (or all events)
+ * input: client - the client currently reading the msg from
+ *        req    - the event_name
+ * output: TS_ERR_xx
+ * note: the req should be the event name; does not send reply to client
+ *************************************************************************/
+static TSMgmtError
+handle_event_unreg_callback(EventClientT *client, void *req, size_t reqlen)
+{
+  MgmtMarshallInt optype;
+  MgmtMarshallString name = nullptr;
+  TSMgmtError ret;
+
+  ret = recv_mgmt_request(req, reqlen, OpType::EVENT_UNREG_CALLBACK, &optype, &name);
+  if (ret != TS_ERR_OKAY) {
+    goto done;
+  }
+
+  // mark the specified alarm as "wanting to be notified" in the client's alarm_registered list
+  if (strlen(name) == 0) { // mark all alarms
+    for (bool &i : client->events_registered) {
+      i = false;
+    }
+  } else {
+    int id = get_event_id(name);
+    if (id < 0) {
+      ret = TS_ERR_FAIL;
+      goto done;
+    }
+
+    client->events_registered[id] = false;
+  }
+
+  ret = TS_ERR_OKAY;
+
+done:
+  ats_free(name);
+  return ret;
+}
+
+/*-------------------------------------------------------------------------
+                             MAIN EVENT LOOP
+ --------------------------------------------------------------------------*/
+
 /*********************************************************************
  * event_callback_main
  *
@@ -268,6 +363,9 @@ event_callback_main(void *arg)
   InkHashTableIteratorState con_state; // used to iterate through hash table
   int fds_ready;                       // return value for select go here
   struct timeval timeout;
+
+  callbacks->registerCallback(OpType::EVENT_REG_CALLBACK, handle_event_reg_callback);
+  callbacks->registerCallback(OpType::EVENT_UNREG_CALLBACK, handle_event_unreg_callback);
 
   while (true) {
     // LINUX fix: to prevent hard-spin reset timeout on each loop
@@ -427,132 +525,41 @@ event_callback_main(void *arg)
   return nullptr;
 }
 
+// using event_message_handler = TSMgmtError (*)(EventClientT *, void *, size_t);
 
-/*-------------------------------------------------------------------------
-                             HANDLER FUNCTIONS
- --------------------------------------------------------------------------*/
-
-/**************************************************************************
- * handle_event_reg_callback
- *
- * purpose: handles request to register a callback for a specific event (or all events)
- * input: client - the client currently reading the msg from
- *        req    - the event_name
- * output: TS_ERR_xx
- * note: the req should be the event name; does not send a reply to client
- *************************************************************************/
-static TSMgmtError
-handle_event_reg_callback(EventClientT *client, void *req, size_t reqlen)
-{
-  MgmtMarshallInt optype;
-  MgmtMarshallString name = nullptr;
-  TSMgmtError ret;
-
-  ret = recv_mgmt_request(req, reqlen, OpType::EVENT_REG_CALLBACK, &optype, &name);
-  if (ret != TS_ERR_OKAY) {
-    goto done;
-  }
-
-  // mark the specified alarm as "wanting to be notified" in the client's alarm_registered list
-  if (strlen(name) == 0) { // mark all alarms
-    for (bool &i : client->events_registered) {
-      i = true;
-    }
-  } else {
-    int id = get_event_id(name);
-    if (id < 0) {
-      ret = TS_ERR_FAIL;
-      goto done;
-    }
-
-    client->events_registered[id] = true;
-  }
-
-  ret = TS_ERR_OKAY;
-
-done:
-  ats_free(name);
-  return ret;
-}
-
-/**************************************************************************
- * handle_event_unreg_callback
- *
- * purpose: handles request to unregister a callback for a specific event (or all events)
- * input: client - the client currently reading the msg from
- *        req    - the event_name
- * output: TS_ERR_xx
- * note: the req should be the event name; does not send reply to client
- *************************************************************************/
-static TSMgmtError
-handle_event_unreg_callback(EventClientT *client, void *req, size_t reqlen)
-{
-  MgmtMarshallInt optype;
-  MgmtMarshallString name = nullptr;
-  TSMgmtError ret;
-
-  ret = recv_mgmt_request(req, reqlen, OpType::EVENT_UNREG_CALLBACK, &optype, &name);
-  if (ret != TS_ERR_OKAY) {
-    goto done;
-  }
-
-  // mark the specified alarm as "wanting to be notified" in the client's alarm_registered list
-  if (strlen(name) == 0) { // mark all alarms
-    for (bool &i : client->events_registered) {
-      i = false;
-    }
-  } else {
-    int id = get_event_id(name);
-    if (id < 0) {
-      ret = TS_ERR_FAIL;
-      goto done;
-    }
-
-    client->events_registered[id] = false;
-  }
-
-  ret = TS_ERR_OKAY;
-
-done:
-  ats_free(name);
-  return ret;
-}
-
-using event_message_handler = TSMgmtError (*)(EventClientT *, void *, size_t);
-
-static const event_message_handler handlers[] = {
-  nullptr,                     // RECORD_SET
-  nullptr,                     // RECORD_GET
-  nullptr,                     // PROXY_STATE_GET
-  nullptr,                     // PROXY_STATE_SET
-  nullptr,                     // RECONFIGURE
-  nullptr,                     // RESTART
-  nullptr,                     // BOUNCE
-  nullptr,                     // EVENT_RESOLVE
-  nullptr,                     // EVENT_GET_MLT
-  nullptr,                     // EVENT_ACTIVE
-  handle_event_reg_callback,   // EVENT_REG_CALLBACK
-  handle_event_unreg_callback, // EVENT_UNREG_CALLBACK
-  nullptr,                     // EVENT_NOTIFY
-  nullptr,                     // DIAGS
-  nullptr,                     // STATS_RESET_NODE
-  nullptr,                     // STORAGE_DEVICE_CMD_OFFLINE
-  nullptr,                     // RECORD_MATCH_GET
-  nullptr,                     // LIFECYCLE_MESSAGE
-};
+// static const event_message_handler handlers[] = {
+//   nullptr,                     // RECORD_SET
+//   nullptr,                     // RECORD_GET
+//   nullptr,                     // PROXY_STATE_GET
+//   nullptr,                     // PROXY_STATE_SET
+//   nullptr,                     // RECONFIGURE
+//   nullptr,                     // RESTART
+//   nullptr,                     // BOUNCE
+//   nullptr,                     // EVENT_RESOLVE
+//   nullptr,                     // EVENT_GET_MLT
+//   nullptr,                     // EVENT_ACTIVE
+//   handle_event_reg_callback,   // EVENT_REG_CALLBACK
+//   handle_event_unreg_callback, // EVENT_UNREG_CALLBACK
+//   nullptr,                     // EVENT_NOTIFY
+//   nullptr,                     // DIAGS
+//   nullptr,                     // STATS_RESET_NODE
+//   nullptr,                     // STORAGE_DEVICE_CMD_OFFLINE
+//   nullptr,                     // RECORD_MATCH_GET
+//   nullptr,                     // LIFECYCLE_MESSAGE
+// };
 
 static TSMgmtError
 handle_event_message(EventClientT *client, void *req, size_t reqlen)
 {
   OpType optype = extract_mgmt_request_optype(req, reqlen);
 
-  if (static_cast<unsigned>(optype) >= countof(handlers)) {
-    goto fail;
-  }
+  // if (static_cast<unsigned>(optype) >= countof(handlers)) {
+  //   goto fail;
+  // }
 
-  if (handlers[static_cast<unsigned>(optype)] == nullptr) {
-    goto fail;
-  }
+  // if (handlers[static_cast<unsigned>(optype)] == nullptr) {
+  //   goto fail;
+  // }
 
   if (mgmt_has_peereid()) {
     uid_t euid = -1;
@@ -565,7 +572,7 @@ handle_event_message(EventClientT *client, void *req, size_t reqlen)
     }
   }
 
-  return handlers[static_cast<unsigned>(optype)](client, req, reqlen);
+  return callbacks->triggerCallback(optype, client, req, reqlen);
 
 fail:
   mgmt_elog(0, "%s: missing handler for type %d event message\n", __func__, (int)optype);

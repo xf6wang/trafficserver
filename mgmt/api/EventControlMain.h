@@ -34,6 +34,8 @@
 
 #include "mgmtapi.h"       //add the include path b/c included in web dir
 #include "CoreAPIShared.h" // for NUM_EVENTS
+#include "MgmtHashTable.h"
+#include "NetworkMessage.h"
 
 // use events_registered[event_id] as index to check if alarm is registered
 typedef struct {
@@ -41,6 +43,16 @@ typedef struct {
   struct sockaddr *adr;
   bool events_registered[NUM_EVENTS];
 } EventClientT;
+
+class EventHashTable : public MgmtHashTable 
+{
+  namespace EventCallbacks
+  {
+    typedef void *(*MgmtCallback)(EventClientT *client, void *req, size_t reqlen);
+  }
+public: 
+    TSMgmtError triggerCallback(OpType op, EventClientT *client, void *req, size_t reqlen);
+};
 
 EventClientT *new_event_client();
 void delete_event_client(EventClientT *client);
