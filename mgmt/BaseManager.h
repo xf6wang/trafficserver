@@ -41,7 +41,6 @@
 
 #include "MgmtDefs.h"
 #include "MgmtMarshall.h"
-#include "MgmtHashTable.h"
 
 /*******************************************
  * used by LocalManager and in Proxy Main. *
@@ -106,6 +105,17 @@
 
 #define MGMT_SIGNAL_SAC_SERVER_DOWN 400
 
+typedef struct _mgmt_message_hdr_type {
+  int msg_id;
+  int data_len;
+} MgmtMessageHdr;
+
+typedef struct _mgmt_event_callback_list {
+  MgmtCallback func;
+  void *opaque_data;
+  struct _mgmt_event_callback_list *next;
+} MgmtCallbackList;
+
 class BaseManager
 {
 public:
@@ -114,11 +124,12 @@ public:
 
   int registerMgmtCallback(int msg_id, MgmtCallback func, void *opaque_callback_data = NULL);
 
-protected:
   LLQ *mgmt_event_queue;
-  LocalMgmtHashTable *mgmt_callback_handler;
+  InkHashTable *mgmt_callback_table;
 
-  void sendMgmtEvent(int msg_id, char *data_raw, int data_len);
+protected:
+  void executeMgmtCallback(int msg_id, char *data_raw, int data_len);
+
 private:
 }; /* End class BaseManager */
 

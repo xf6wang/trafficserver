@@ -364,6 +364,7 @@ event_callback_main(void *arg)
   int fds_ready;                       // return value for select go here
   struct timeval timeout;
 
+  callbacks = new EventHashTable();
   callbacks->registerCallback(OpType::EVENT_REG_CALLBACK, handle_event_reg_callback);
   callbacks->registerCallback(OpType::EVENT_UNREG_CALLBACK, handle_event_unreg_callback);
 
@@ -507,6 +508,7 @@ event_callback_main(void *arg)
   // delete tables
   delete_mgmt_events();
 
+  delete callbacks;
   // iterate through hash table; close client socket connections and remove entry
   con_entry = ink_hash_table_iterator_first(accepted_clients, &con_state);
   while (con_entry) {
@@ -572,9 +574,131 @@ handle_event_message(EventClientT *client, void *req, size_t reqlen)
     }
   }
 
-  return callbacks->triggerCallback(optype, client, req, reqlen);
+  return callbacks->executeCallback(optype, client, req, reqlen);
 
-fail:
-  mgmt_elog(0, "%s: missing handler for type %d event message\n", __func__, (int)optype);
-  return TS_ERR_PARAMS;
+// fail:
+//   mgmt_elog(0, "%s: missing handler for type %d event message\n", __func__, (int)optype);
+//   return TS_ERR_PARAMS;
+}
+
+
+EventHashTable::EventHashTable()
+{
+    /* Setup the event queue and callback tables */
+    mgmt_incoming_queue    = create_queue();
+    mgmt_callback_table = ink_hash_table_create(InkHashTableKeyType_Word);
+    ink_mutex_init(&mutex);
+}
+
+EventHashTable::~EventHashTable()
+{
+    InkHashTableEntry *entry;
+    InkHashTableIteratorState iterator_state;
+    
+    while (!queue_is_empty(mgmt_incoming_queue)) {
+        MgmtMessageHdr *mh = (MgmtMessageHdr *)dequeue(mgmt_incoming_queue);
+        ats_free(mh);
+    }
+    ats_free(mgmt_incoming_queue);
+
+    ink_mutex_acquire(&mutex);
+    for (entry = ink_hash_table_iterator_first(mgmt_callback_table, &iterator_state); entry != nullptr;
+         entry = ink_hash_table_iterator_next(mgmt_callback_table, &iterator_state)) {
+        EventCallbackList *tmp, *cb_list = (EventCallbackList *)entry;
+        
+        for (tmp = cb_list->next; tmp; tmp = cb_list->next) {
+            ats_free(cb_list);
+            cb_list = tmp;
+        }
+        ats_free(cb_list);
+    }
+    ink_mutex_release(&mutex);
+    ink_mutex_destroy(&mutex);
+}
+
+
+int
+EventHashTable::registerCallback(OpType op, EventMgmtCallback cb, void *opaque_cb_data)
+{
+    EventCallbackList *cb_list;
+    InkHashTableValue hash_value;
+    
+    ink_mutex_acquire(&mutex);
+    if (ink_hash_table_lookup(mgmt_callback_table, (InkHashTableKey)(intptr_t)op, &hash_value) != 0) {
+        cb_list = (EventCallbackList *)hash_value;
+    } else {
+        cb_list = nullptr;
+    }
+    
+    if (cb_list) {
+        EventCallbackList *tmp;
+        
+        for (tmp = cb_list; tmp->next; tmp = tmp->next) {
+            ;
+        }
+        tmp->next              = (EventCallbackList *)ats_malloc(sizeof(EventCallbackList));
+        tmp->next->func        = cb;
+        tmp->next->opaque_data = opaque_cb_data;
+        tmp->next->next        = nullptr;
+    } else {
+        cb_list              = (EventCallbackList *)ats_malloc(sizeof(EventCallbackList));
+        cb_list->func        = cb;
+        cb_list->opaque_data = opaque_cb_data;
+        cb_list->next        = nullptr;
+        ink_hash_table_insert(mgmt_callback_table, (InkHashTableKey)(intptr_t)op, cb_list);
+    }
+    ink_mutex_release(&mutex);
+    return 0;
+}
+
+int
+EventHashTable::removeCallback(OpType op, EventMgmtCallback cb)
+{
+    EventCallbackList *cb_list;
+    InkHashTableValue hash_value;
+
+    ink_mutex_acquire(&mutex);
+    if (ink_hash_table_lookup(mgmt_callback_table, (InkHashTableKey)(intptr_t)op, &hash_value) != 0) {
+        cb_list = (EventCallbackList *)hash_value;
+    } else {
+        ink_mutex_release(&mutex);
+        return 0; // doesn't exist to begin with
+    }
+    
+    ink_assert(cb_list != nullptr);
+    EventCallbackList *tmp;
+    
+    // remove callback function from linked list
+    for (tmp = cb_list; tmp->next; tmp = tmp->next) {
+        if(tmp->next->func == cb) {
+            if((tmp->next)->next) {
+                EventCallbackList* tmp_next = (tmp->next)->next;
+                ats_free(tmp->next);
+                tmp->next = tmp_next;
+            }
+            else { 
+                ats_free(tmp->next);
+                tmp->next = nullptr;
+            }
+            break;
+        }
+    }
+    ink_mutex_release(&mutex);
+    return 0;
+}
+
+TSMgmtError
+EventHashTable::executeCallback(OpType op, EventClientT *client, void *req, size_t reqlen)
+{
+    ink_mutex_acquire(&mutex);
+    InkHashTableValue hash_value;
+
+    // shouldn't call this unless caller holds mutex
+    if (ink_hash_table_lookup(mgmt_callback_table, (InkHashTableKey)(intptr_t)op, &hash_value) != 0) {
+        for (EventCallbackList *cb_list = (EventCallbackList *)hash_value; cb_list; cb_list = cb_list->next) {
+            ink_mutex_release(&mutex);
+            return (*((EventMgmtCallback)(cb_list->func)))(client, req, reqlen);
+        }
+    }
+    return TS_ERR_FAIL;
 }

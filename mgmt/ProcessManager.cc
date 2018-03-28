@@ -420,20 +420,20 @@ ProcessManager::handleMgmtMsgFromLM(MgmtMessageHdr *mh)
   Debug("pmgmt", "processing event id '%d' payload=%d", mh->msg_id, mh->data_len);
   switch (mh->msg_id) {
   case MGMT_EVENT_SHUTDOWN:
-    sendMgmtEvent(MGMT_EVENT_SHUTDOWN, nullptr, 0);
+    executeMgmtCallback(MGMT_EVENT_SHUTDOWN, nullptr, 0);
     Alert("exiting on shutdown message");
     break;
   case MGMT_EVENT_RESTART:
-    sendMgmtEvent(MGMT_EVENT_RESTART, nullptr, 0);
+    executeMgmtCallback(MGMT_EVENT_RESTART, nullptr, 0);
     break;
   case MGMT_EVENT_DRAIN:
-    sendMgmtEvent(MGMT_EVENT_DRAIN, data_raw, mh->data_len);
+    executeMgmtCallback(MGMT_EVENT_DRAIN, data_raw, mh->data_len);
     break;
   case MGMT_EVENT_CLEAR_STATS:
-    sendMgmtEvent(MGMT_EVENT_CLEAR_STATS, nullptr, 0);
+    executeMgmtCallback(MGMT_EVENT_CLEAR_STATS, nullptr, 0);
     break;
   case MGMT_EVENT_ROLL_LOG_FILES:
-    sendMgmtEvent(MGMT_EVENT_ROLL_LOG_FILES, nullptr, 0);
+    executeMgmtCallback(MGMT_EVENT_ROLL_LOG_FILES, nullptr, 0);
     break;
   case MGMT_EVENT_PLUGIN_CONFIG_UPDATE:
     if (data_raw != nullptr && data_raw[0] != '\0' && this->cbtable) {
@@ -458,13 +458,13 @@ ProcessManager::handleMgmtMsgFromLM(MgmtMessageHdr *mh)
     */
     break;
   case MGMT_EVENT_LIBRECORDS:
-    sendMgmtEvent(MGMT_EVENT_LIBRECORDS, data_raw, mh->data_len);
+    executeMgmtCallback(MGMT_EVENT_LIBRECORDS, data_raw, mh->data_len);
     break;
   case MGMT_EVENT_STORAGE_DEVICE_CMD_OFFLINE:
-    sendMgmtEvent(MGMT_EVENT_STORAGE_DEVICE_CMD_OFFLINE, data_raw, mh->data_len);
+    executeMgmtCallback(MGMT_EVENT_STORAGE_DEVICE_CMD_OFFLINE, data_raw, mh->data_len);
     break;
   case MGMT_EVENT_LIFECYCLE_MESSAGE:
-    sendMgmtEvent(MGMT_EVENT_LIFECYCLE_MESSAGE, data_raw, mh->data_len);
+    executeMgmtCallback(MGMT_EVENT_LIFECYCLE_MESSAGE, data_raw, mh->data_len);
     break;
   default:
     Warning("received unknown message ID %d\n", mh->msg_id);

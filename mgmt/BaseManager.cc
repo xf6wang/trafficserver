@@ -38,29 +38,88 @@
 
 BaseManager::BaseManager()
 {
+  /* Setup the event queue and callback tables */
   mgmt_event_queue    = create_queue();
-  mgmt_callback_handler = new LocalMgmtHashTable();
+  mgmt_callback_table = ink_hash_table_create(InkHashTableKeyType_Word);
+
 } /* End BaseManager::BaseManager */
 
 BaseManager::~BaseManager()
 {
+  InkHashTableEntry *entry;
+  InkHashTableIteratorState iterator_state;
+
   while (!queue_is_empty(mgmt_event_queue)) {
-      MgmtMessageHdr *mh = (MgmtMessageHdr *)dequeue(mgmt_event_queue);
-      ats_free(mh);
+    MgmtMessageHdr *mh = (MgmtMessageHdr *)dequeue(mgmt_event_queue);
+    ats_free(mh);
   }
   ats_free(mgmt_event_queue);
 
-  delete mgmt_callback_handler;
+  for (entry = ink_hash_table_iterator_first(mgmt_callback_table, &iterator_state); entry != nullptr;
+       entry = ink_hash_table_iterator_next(mgmt_callback_table, &iterator_state)) {
+    MgmtCallbackList *tmp, *cb_list = (MgmtCallbackList *)entry;
+
+    for (tmp = cb_list->next; tmp; tmp = cb_list->next) {
+      ats_free(cb_list);
+      cb_list = tmp;
+    }
+    ats_free(cb_list);
+  }
+
+  return;
 } /* End BaseManager::~BaseManager */
 
-int 
-BaseManager::registerMgmtCallback(int msg_id, MgmtCallback func, void *opaque_callback_data)
+/*
+ * registerMgmtCallback(...)
+ *   Function to register callback's for various management events, such
+ * as shutdown, re-init, etc. The following callbacks should be
+ * registered:
+ *                MGMT_EVENT_SHUTDOWN  (graceful shutdown)
+ *                MGMT_EVENT_RESTART   (graceful reboot)
+ *                ...
+ *
+ *   Returns:   -1      on error(invalid event id passed in)
+ *               or     value
+ */
+int
+BaseManager::registerMgmtCallback(int msg_id, MgmtCallback cb, void *opaque_cb_data)
 {
-  return mgmt_callback_handler->registerCallback(msg_id, func, opaque_callback_data);
-}
+  MgmtCallbackList *cb_list;
+  InkHashTableValue hash_value;
 
-void 
-BaseManager::sendMgmtEvent(int msg_id, char* data_raw, int data_len)
+  if (ink_hash_table_lookup(mgmt_callback_table, (InkHashTableKey)(intptr_t)msg_id, &hash_value) != 0) {
+    cb_list = (MgmtCallbackList *)hash_value;
+  } else {
+    cb_list = nullptr;
+  }
+
+  if (cb_list) {
+    MgmtCallbackList *tmp;
+
+    for (tmp = cb_list; tmp->next; tmp = tmp->next) {
+      ;
+    }
+    tmp->next              = (MgmtCallbackList *)ats_malloc(sizeof(MgmtCallbackList));
+    tmp->next->func        = cb;
+    tmp->next->opaque_data = opaque_cb_data;
+    tmp->next->next        = nullptr;
+  } else {
+    cb_list              = (MgmtCallbackList *)ats_malloc(sizeof(MgmtCallbackList));
+    cb_list->func        = cb;
+    cb_list->opaque_data = opaque_cb_data;
+    cb_list->next        = nullptr;
+    ink_hash_table_insert(mgmt_callback_table, (InkHashTableKey)(intptr_t)msg_id, cb_list);
+  }
+  return msg_id;
+} /* End BaseManager::registerMgmtCallback */
+
+void
+BaseManager::executeMgmtCallback(int msg_id, char *data_raw, int data_len)
 {
-  mgmt_callback_handler->triggerCallback(msg_id, data_raw, data_len);
+  InkHashTableValue hash_value;
+  if (ink_hash_table_lookup(mgmt_callback_table, (InkHashTableKey)(intptr_t)msg_id, &hash_value) != 0) {
+    for (MgmtCallbackList *cb_list = (MgmtCallbackList *)hash_value; cb_list; cb_list = cb_list->next) {
+      (*((MgmtCallback)(cb_list->func)))(cb_list->opaque_data, data_raw, data_len);
+    }
+  }
 }

@@ -30,41 +30,22 @@
 #include "ts/ink_hash_table.h"
 
 #include "MgmtDefs.h"
-#include "MgmtMarshall.h"
+#include "mgmtapi.h"
 
-typedef struct _mgmt_message_hdr_type {
-    int msg_id;
-    int data_len;
-} MgmtMessageHdr;
-
-typedef struct _mgmt_event_callback_list {
-    MgmtCallback func;
-    void *opaque_data;
-    struct _mgmt_event_callback_list *next;
-} MgmtCallbackList;
-
+template<typename KEY, typename CB>
 class MgmtHashTable
 {
 public:
     MgmtHashTable();
     virtual ~MgmtHashTable();
     
-    int registerCallback(int msg_id, MgmtCallback func, void *opaque_callback_data = NULL);
-    int removeCallback(int msg_id, MgmtCallback func);
-    
+    TSMgmtError registerCallback(KEY key, CB cb);
+    TSMgmtError removeCallback(KEY key);
+
 protected:
     ink_mutex mutex;
     LLQ *mgmt_incoming_queue;
     InkHashTable *mgmt_callback_table;
 }; /* End class MgmtHashTable */
-
-
-class LocalMgmtHashTable : public MgmtHashTable 
-{
-public: 
-    void triggerCallback(int msg_id, char *data_raw, int data_len);
-private:
-    void executeCallback(int msg_id, char *data_raw, int data_len);
-};
 
 #endif /* _MGMT_CALLBACK_SYSTEM_H */
