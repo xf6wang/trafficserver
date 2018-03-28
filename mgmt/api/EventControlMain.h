@@ -46,21 +46,7 @@ typedef struct {
 
 typedef TSMgmtError (*EventMgmtCallback)(EventClientT *client, void *req, size_t reqlen);
 
-typedef struct _event_callback_list {
-    EventMgmtCallback func;
-    void *opaque_data;
-    struct _event_callback_list *next;
-} EventCallbackList;
-
-class EventHashTable : public MgmtHashTable 
-{
-public: 
-    EventHashTable();
-    ~EventHashTable();
-    TSMgmtError executeCallback(OpType op, EventClientT *client, void *req, size_t reqlen);
-    int registerCallback(OpType op, EventMgmtCallback func, void *opaque_callback_data = NULL);
-    int removeCallback(OpType op, EventMgmtCallback func);
-};
+void register_new_callback(OpType op, EventMgmtCallback cb);
 
 EventClientT *new_event_client();
 void delete_event_client(EventClientT *client);

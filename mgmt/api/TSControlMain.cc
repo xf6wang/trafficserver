@@ -41,6 +41,7 @@
 #include "CoreAPI.h"
 #include "CoreAPIShared.h"
 #include "NetworkUtilsLocal.h"
+#include "MgmtHashTable.h"
 
 #define TIMEOUT_SECS 1 // the num secs for select timeout
 
@@ -49,6 +50,8 @@ static InkHashTable *accepted_con; // a list of all accepted client connections
 static TSMgmtError handle_control_message(int fd, void *msg, size_t msglen);
 
 static RecBool disable_modification = false;
+
+static MgmtHashTable<int, ControlHandler> control_callbacks;
 
 /*********************************************************************
  * create_client
@@ -141,6 +144,29 @@ ts_ctrl_main(void *arg)
   InkHashTableIteratorState con_state; // used to iterate through hash table
   int fds_ready;                       // stores return value for select
   struct timeval timeout;
+
+  control_callbacks.registerCallback(RECORD_SET                 , {MGMT_API_PRIVILEGED, handle_record_set});
+  control_callbacks.registerCallback(RECORD_GET                 , {0, handle_record_get});
+  control_callbacks.registerCallback(PROXY_STATE_GET            , {0, handle_proxy_state_get});
+  control_callbacks.registerCallback(PROXY_STATE_SET            , {MGMT_API_PRIVILEGED, handle_proxy_state_set});
+  control_callbacks.registerCallback(RECONFIGURE                , {MGMT_API_PRIVILEGED, handle_reconfigure});
+  control_callbacks.registerCallback(RESTART                    , {MGMT_API_PRIVILEGED, handle_restart});
+  control_callbacks.registerCallback(BOUNCE                     , {MGMT_API_PRIVILEGED, handle_restart});
+  control_callbacks.registerCallback(STOP                       , {MGMT_API_PRIVILEGED, handle_stop});
+  control_callbacks.registerCallback(DRAIN                      , {MGMT_API_PRIVILEGED, handle_drain});
+  control_callbacks.registerCallback(EVENT_RESOLVE              , {MGMT_API_PRIVILEGED, handle_event_resolve});
+  control_callbacks.registerCallback(EVENT_GET_MLT              , {0, handle_event_get_mlt});
+  control_callbacks.registerCallback(EVENT_ACTIVE               , {0, handle_event_active});
+  control_callbacks.registerCallback(EVENT_REG_CALLBACK         , {0, nullptr});
+  control_callbacks.registerCallback(EVENT_UNREG_CALLBACK       , {0, nullptr});
+  control_callbacks.registerCallback(EVENT_NOTIFY               , {0, nullptr});
+  control_callbacks.registerCallback(STATS_RESET_NODE           , {MGMT_API_PRIVILEGED, handle_stats_reset});
+  control_callbacks.registerCallback(STORAGE_DEVICE_CMD_OFFLINE , {MGMT_API_PRIVILEGED, handle_storage_device_cmd_offline});
+  control_callbacks.registerCallback(RECORD_MATCH_GET           , {0, handle_record_match});
+  control_callbacks.registerCallback(API_PING                   , {0, handle_api_ping});
+  control_callbacks.registerCallback(SERVER_BACKTRACE           , {MGMT_API_PRIVILEGED, handle_server_backtrace});
+  control_callbacks.registerCallback(RECORD_DESCRIBE_CONFIG     , {0, handle_record_describe});
+  control_callbacks.registerCallback(LIFECYCLE_MESSAGE          , {MGMT_API_PRIVILEGED, handle_lifecycle_message});
 
   // loops until TM dies; waits for and processes requests from clients
   while (true) {
@@ -987,36 +1013,6 @@ handle_lifecycle_message(int fd, void *req, size_t reqlen)
 }
 /**************************************************************************/
 
-struct control_message_handler {
-  unsigned flags;
-  TSMgmtError (*handler)(int, void *, size_t);
-};
-
-static const control_message_handler handlers[] = {
-  /* RECORD_SET                 */ {MGMT_API_PRIVILEGED, handle_record_set},
-  /* RECORD_GET                 */ {0, handle_record_get},
-  /* PROXY_STATE_GET            */ {0, handle_proxy_state_get},
-  /* PROXY_STATE_SET            */ {MGMT_API_PRIVILEGED, handle_proxy_state_set},
-  /* RECONFIGURE                */ {MGMT_API_PRIVILEGED, handle_reconfigure},
-  /* RESTART                    */ {MGMT_API_PRIVILEGED, handle_restart},
-  /* BOUNCE                     */ {MGMT_API_PRIVILEGED, handle_restart},
-  /* STOP                       */ {MGMT_API_PRIVILEGED, handle_stop},
-  /* DRAIN                      */ {MGMT_API_PRIVILEGED, handle_drain},
-  /* EVENT_RESOLVE              */ {MGMT_API_PRIVILEGED, handle_event_resolve},
-  /* EVENT_GET_MLT              */ {0, handle_event_get_mlt},
-  /* EVENT_ACTIVE               */ {0, handle_event_active},
-  /* EVENT_REG_CALLBACK         */ {0, nullptr},
-  /* EVENT_UNREG_CALLBACK       */ {0, nullptr},
-  /* EVENT_NOTIFY               */ {0, nullptr},
-  /* STATS_RESET_NODE           */ {MGMT_API_PRIVILEGED, handle_stats_reset},
-  /* STORAGE_DEVICE_CMD_OFFLINE */ {MGMT_API_PRIVILEGED, handle_storage_device_cmd_offline},
-  /* RECORD_MATCH_GET           */ {0, handle_record_match},
-  /* API_PING                   */ {0, handle_api_ping},
-  /* SERVER_BACKTRACE           */ {MGMT_API_PRIVILEGED, handle_server_backtrace},
-  /* RECORD_DESCRIBE_CONFIG     */ {0, handle_record_describe},
-  /* LIFECYCLE_MESSAGE          */ {MGMT_API_PRIVILEGED, handle_lifecycle_message},
-};
-
 // This should use countof(), but we need a constexpr :-/
 static_assert((sizeof(handlers) / sizeof(handlers[0])) == static_cast<unsigned>(OpType::UNDEFINED_OP),
               "handlers array is not of correct size");
@@ -1027,13 +1023,8 @@ handle_control_message(int fd, void *req, size_t reqlen)
   OpType optype = extract_mgmt_request_optype(req, reqlen);
   TSMgmtError error;
 
-  if (static_cast<unsigned>(optype) >= countof(handlers)) {
-    goto fail;
-  }
+  ControlHandler* ch = control_callbacks.getCallback(optype);
 
-  if (handlers[static_cast<unsigned>(optype)].handler == nullptr) {
-    goto fail;
-  }
 
   if (mgmt_has_peereid()) {
     uid_t euid = -1;

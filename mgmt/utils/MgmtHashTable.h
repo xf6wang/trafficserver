@@ -28,6 +28,10 @@
 #include "ts/ink_mutex.h"
 #include "ts/ink_llqueue.h"
 #include "ts/ink_hash_table.h"
+#include "ts/ink_platform.h"
+#include "ts/ink_hash_table.h"
+#include "ts/ink_memory.h"
+#include "MgmtHashTable.h"
 
 #include "MgmtDefs.h"
 #include "mgmtapi.h"
@@ -42,10 +46,71 @@ public:
     TSMgmtError registerCallback(KEY key, CB cb);
     TSMgmtError removeCallback(KEY key);
 
+    CB* getCallback(KEY key);
 protected:
     ink_mutex mutex;
-    LLQ *mgmt_incoming_queue;
     InkHashTable *mgmt_callback_table;
 }; /* End class MgmtHashTable */
+
+
+template<typename KEY, typename CB>
+MgmtHashTable<KEY, CB>::MgmtHashTable()
+{
+    /* Setup the callback table */
+    mgmt_callback_table = ink_hash_table_create(InkHashTableKeyType_Word);
+    ink_mutex_init(&mutex);
+}
+
+template<typename KEY, typename CB>
+MgmtHashTable<KEY, CB>::~MgmtHashTable()
+{
+    ink_mutex_acquire(&mutex);
+
+    ink_hash_table_destroy(mgmt_callback_table);
+
+    ink_mutex_release(&mutex);
+    ink_mutex_destroy(&mutex);
+}
+
+
+template<typename KEY, typename CB>
+TSMgmtError
+MgmtHashTable<KEY, CB>::registerCallback(KEY key, CB cb)
+{
+    InkHashTableValue hash_value;
+    TSMgmtError ret = TS_ERR_OKAY;
+
+    ink_mutex_acquire(&mutex);
+    if (ink_hash_table_lookup(mgmt_callback_table, (InkHashTableKey)(intptr_t)key, &hash_value) == 0) {
+        ink_hash_table_insert(mgmt_callback_table, (InkHashTableKey)(intptr_t)key, &cb);
+    } else {
+        ret = TS_ERR_PARAMS; // fatal 
+    }
+    
+    ink_mutex_release(&mutex);
+    return ret;
+}
+
+template<typename KEY, typename CB>
+TSMgmtError
+MgmtHashTable<KEY, CB>::removeCallback(KEY key)
+{
+    ink_mutex_acquire(&mutex);
+    TSMgmtError ret = (ink_hash_table_delete(mgmt_callback_table, (InkHashTableKey)(intptr_t)key)) ? TS_ERR_OKAY : TS_ERR_PARAMS;
+    ink_mutex_release(&mutex);
+
+    return ret;
+}
+
+template<typename KEY, typename CB>
+CB*
+MgmtHashTable<KEY, CB>::getCallback(KEY key)
+{
+    InkHashTableValue hash_value;
+    if (ink_hash_table_lookup(mgmt_callback_table, (InkHashTableKey)(intptr_t)key, &hash_value) != 0) {
+        return (CB*) hash_value;
+    }
+    return nullptr;
+}
 
 #endif /* _MGMT_CALLBACK_SYSTEM_H */

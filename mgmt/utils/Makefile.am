@@ -38,14 +38,13 @@ check_PROGRAMS = test_marshall
 TESTS = $(check_PROGRAMS)
 
 libutils_COMMON = \
+  MgmtHashTable.h \
   MgmtMarshall.cc \
   MgmtMarshall.h \
   MgmtSocket.cc \
   MgmtSocket.h \
   MgmtUtils.cc \
-  MgmtUtils.h \
-  MgmtHashTable.cc \
-  MgmtHashTable.h 
+  MgmtUtils.h 
 
 libutils_lm_la_SOURCES = \
   $(libutils_COMMON) \
