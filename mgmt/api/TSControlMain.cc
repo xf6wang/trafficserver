@@ -814,28 +814,7 @@ done:
   ats_free(name);
   return ret;
 }
-/**************************************************************************
- * handle_lifecycle_message
- *
- * purpose: handle lifecyle message to plugins
- * output: TS_ERR_xx
- * note: None
- *************************************************************************/
-static TSMgmtError
-handle_lifecycle_message(int fd, void *req, size_t reqlen)
-{
-  MgmtMarshallInt optype;
-  MgmtMarshallInt err;
-  MgmtMarshallString tag;
-  MgmtMarshallData data;
 
-  err = recv_mgmt_request(req, reqlen, OpType::LIFECYCLE_MESSAGE, &optype, &tag, &data);
-  if (err == TS_ERR_OKAY) {
-    lmgmt->signalEvent(MGMT_EVENT_LIFECYCLE_MESSAGE, static_cast<char *>(req), reqlen);
-  }
-
-  return send_mgmt_response(fd, OpType::LIFECYCLE_MESSAGE, &err);
-}
 /**************************************************************************/
 
 static TSMgmtError
@@ -936,7 +915,6 @@ ts_ctrl_main(void *arg)
   control_callbacks.registerCallback(OpType::API_PING                   , {0, handle_api_ping});
   control_callbacks.registerCallback(OpType::SERVER_BACKTRACE           , {MGMT_API_PRIVILEGED, handle_server_backtrace});
   control_callbacks.registerCallback(OpType::RECORD_DESCRIBE_CONFIG     , {0, handle_record_describe});
-  control_callbacks.registerCallback(OpType::LIFECYCLE_MESSAGE          , {MGMT_API_PRIVILEGED, handle_lifecycle_message});
 
   // loops until TM dies; waits for and processes requests from clients
   while (true) {

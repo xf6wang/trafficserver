@@ -35,6 +35,7 @@ noinst_LTLIBRARIES = libmgmtapilocal.la libmgmtapi.la
 lib_LTLIBRARIES = libtsmgmt.la
 
 libmgmtapi_la_SOURCES = \
+  LifeCycle.h \
   CoreAPI.h \
   CoreAPIShared.cc \
   CoreAPIShared.h \
@@ -53,17 +54,19 @@ endif
 
 libmgmtapilocal_la_SOURCES = \
   CoreAPI.cc \
+  LifeCycleLocal.cc \
   EventControlMain.cc \
   EventControlMain.h \
   NetworkUtilsLocal.cc \
   NetworkUtilsLocal.h \
   TSControlMain.cc \
-  TSControlMain.h
+  TSControlMain.h 
 
 libtsmgmt_la_SOURCES = \
+  LifeCycleRemote.cc \
   CoreAPIRemote.cc \
   NetworkUtilsRemote.cc \
-  NetworkUtilsRemote.h
+  NetworkUtilsRemote.h 
 
 libmgmtapilocal_la_LIBADD = \
   libmgmtapi.la \
