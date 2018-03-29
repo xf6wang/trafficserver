@@ -43,7 +43,7 @@
 ink_mutex mgmt_events_lock;
 LLQ *mgmt_events;
 InkHashTable *accepted_clients; // list of all accepted client connections
-MgmtHashTable<OpType, EventMgmtCallback> *event_callbacks;
+static MgmtHashTable<OpType, EventMgmtCallback> event_callbacks;
 
 static TSMgmtError handle_event_message(EventClientT *client, void *req, size_t reqlen);
 
@@ -192,7 +192,7 @@ delete_event_queue(LLQ *q)
 void
 register_new_callback(OpType op, EventMgmtCallback cb)
 {
-  event_callbacks->registerCallback(op, cb);
+  event_callbacks.registerCallback(op, cb);
 }
 
 
@@ -371,9 +371,8 @@ event_callback_main(void *arg)
   int fds_ready;                       // return value for select go here
   struct timeval timeout;
 
-  event_callbacks = new MgmtHashTable<OpType, EventMgmtCallback>();
-  event_callbacks->registerCallback(OpType::EVENT_REG_CALLBACK, handle_event_reg_callback);
-  event_callbacks->registerCallback(OpType::EVENT_UNREG_CALLBACK, handle_event_unreg_callback);
+  event_callbacks.registerCallback(OpType::EVENT_REG_CALLBACK, handle_event_reg_callback);
+  event_callbacks.registerCallback(OpType::EVENT_UNREG_CALLBACK, handle_event_unreg_callback);
 
   while (true) {
     // LINUX fix: to prevent hard-spin reset timeout on each loop
@@ -515,7 +514,6 @@ event_callback_main(void *arg)
   // delete tables
   delete_mgmt_events();
 
-  delete event_callbacks;
   // iterate through hash table; close client socket connections and remove entry
   con_entry = ink_hash_table_iterator_first(accepted_clients, &con_state);
   while (con_entry) {
@@ -550,7 +548,7 @@ handle_event_message(EventClientT *client, void *req, size_t reqlen)
     }
   }
 
-  EventMgmtCallback* cb = event_callbacks->getCallback(optype);
+  EventMgmtCallback* cb = event_callbacks.getCallback(optype);
   if(cb == nullptr) {
     mgmt_elog(0, "%s: missing handler for type %d event message\n", __func__, (int)optype);
     return TS_ERR_PARAMS;
