@@ -360,17 +360,3 @@ StatPagesManager statPagesManager;
 
 #include "ProcessManager.h"
 inkcoreapi ProcessManager *pmgmt = nullptr;
-
-int
-BaseManager::registerMgmtCallback(int, MgmtCallback, void *)
-{
-  ink_assert(false);
-  return 0;
-}
-
-void
-ProcessManager::signalManager(int, char const *, int)
-{
-  ink_assert(false);
-  return;
-}

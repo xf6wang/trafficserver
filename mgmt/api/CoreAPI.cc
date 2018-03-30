@@ -475,18 +475,7 @@ StorageDeviceCmdOffline(const char *dev)
   lmgmt->signalEvent(MGMT_EVENT_STORAGE_DEVICE_CMD_OFFLINE, dev);
   return TS_ERR_OKAY;
 }
-/*-------------------------------------------------------------------------
- * Lifecycle Message
- *-------------------------------------------------------------------------
- * Signal plugins.
- */
-TSMgmtError
-LifecycleMessage(const char *tag, void const *data, size_t data_size)
-{
-  ink_release_assert(!"Not expected to reach here");
-  lmgmt->signalEvent(MGMT_EVENT_LIFECYCLE_MESSAGE, tag);
-  return TS_ERR_OKAY;
-}
+
 /**************************************************************************
  * RECORD OPERATIONS
  *************************************************************************/

@@ -1,34 +1,32 @@
 /** @file
 
-  A brief file description
+A brief file description
 
-  @section license License
+@section license License
 
-  Licensed to the Apache Software Foundation (ASF) under one
-  or more contributor license agreements.  See the NOTICE file
-  distributed with this work for additional information
-  regarding copyright ownership.  The ASF licenses this file
-  to you under the Apache License, Version 2.0 (the
-  "License"); you may not use this file except in compliance
-  with the License.  You may obtain a copy of the License at
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
 
-      http://www.apache.org/licenses/LICENSE-2.0
+    http://www.apache.org/licenses/LICENSE-2.0
 
-  Unless required by applicable law or agreed to in writing, software
-  distributed under the License is distributed on an "AS IS" BASIS,
-  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-  See the License for the specific language governing permissions and
-  limitations under the License.
- */
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
 
 /*****************************************************************************
- * Filename: EventControlMain.cc
- * Purpose: Handles all event requests from the user.
- * Created: 01/08/01
- * Created by: lant
- *
- ***************************************************************************/
-
+* Filename: ServerControlMain.cc
+* Purpose: The main section for a server that handles requests to and from
+*   remote clients. traffic_manager acts as the server and traffic_server,
+*   traffic_ctl, etc are considered remote clients. 
+***************************************************************************/
 #include "ts/ink_platform.h"
 #include "ts/ink_sock.h"
 #include "LocalManager.h"
@@ -38,47 +36,32 @@
 #include "EventControlMain.h"
 #include "CoreAPI.h"
 #include "NetworkUtilsLocal.h"
+#include "NetworkMessage.h"
 
 // variables that are very important
 ink_mutex mgmt_events_lock;
 LLQ *mgmt_events;
 InkHashTable *accepted_clients; // list of all accepted client connections
-static MgmtHashTable<OpType, EventMgmtCallback> event_callbacks;
 
-static TSMgmtError handle_event_message(EventClientT *client, void *req, size_t reqlen);
+static TSMgmtError handle_event_message(RPC_Client *client, void *req, size_t reqlen);
 
-/*********************************************************************
- * new_event_client
- *
- * purpose: creates a new EventClientT and return pointer to it
- * input: None
- * output: EventClientT
- * note: None
- *********************************************************************/
-EventClientT *
-new_event_client()
+/// Create a new RPC client and return a pointer to it.
+static RPC_Client *
+create_client()
 {
-  EventClientT *ele = (EventClientT *)ats_malloc(sizeof(EventClientT));
+  RPC_Client *ele = (RPC_Client *)ats_malloc(sizeof(RPC_Client));
 
   // now set the alarms registered section
   for (bool &i : ele->events_registered) {
     i = false;
   }
-
   ele->adr = (struct sockaddr *)ats_malloc(sizeof(struct sockaddr));
   return ele;
 }
 
-/*********************************************************************
- * delete_event_client
- *
- * purpose: frees memory allocated for an EventClientT
- * input: EventClientT
- * output: None
- * note: None
- *********************************************************************/
+/// Frees memory allocated for a RPC client. 
 void
-delete_event_client(EventClientT *client)
+delete_client(RPC_Client *client)
 {
   if (client) {
     ats_free(client->adr);
@@ -87,16 +70,9 @@ delete_event_client(EventClientT *client)
   return;
 }
 
-/*********************************************************************
- * remove_event_client
- *
- * purpose: removes the EventClientT from the specified hashtable; includes
- *          removing the binding and freeing the ClientT
- * input: client - the ClientT to remove
- * output:
- *********************************************************************/
-void
-remove_event_client(EventClientT *client, InkHashTable *table)
+/// Remove client from a hashtable, deletes client in the process. 
+static void
+remove_client(RPC_Client *client, InkHashTable *table)
 {
   // close client socket
   close_socket(client->fd); // close client socket
@@ -104,8 +80,8 @@ remove_event_client(EventClientT *client, InkHashTable *table)
   // remove client binding from hash table
   ink_hash_table_delete(table, (char *)&client->fd);
 
-  // free ClientT
-  delete_event_client(client);
+  // free clent
+  delete_client(client);
 
   return;
 }
@@ -190,24 +166,6 @@ delete_event_queue(LLQ *q)
 }
 
 void
-register_new_callback(OpType op, EventMgmtCallback cb)
-{
-  event_callbacks.registerCallback(op, cb);
-}
-
-
-/*********************************************************************
- * apiEventCallback
- *
- * purpose: callback function registered with alarm processor so that
- *          each time alarm is signalled, can enqueue it in the mgmt_events
- *          queue
- * input:
- * output: None
- * note: None
- *********************************************************************/
-
-void
 apiEventCallback(alarm_t newAlarm, const char * /* ip ATS_UNUSED */, const char *desc)
 {
   // create an TSMgmtEvent
@@ -232,101 +190,6 @@ apiEventCallback(alarm_t newAlarm, const char * /* ip ATS_UNUSED */, const char 
   return;
 }
 
-
-/*-------------------------------------------------------------------------
-                             HANDLER FUNCTIONS
- --------------------------------------------------------------------------*/
-
-/**************************************************************************
- * handle_event_reg_callback
- *
- * purpose: handles request to register a callback for a specific event (or all events)
- * input: client - the client currently reading the msg from
- *        req    - the event_name
- * output: TS_ERR_xx
- * note: the req should be the event name; does not send a reply to client
- *************************************************************************/
-static TSMgmtError
-handle_event_reg_callback(EventClientT *client, void *req, size_t reqlen)
-{
-  MgmtMarshallInt optype;
-  MgmtMarshallString name = nullptr;
-  TSMgmtError ret;
-
-  ret = recv_mgmt_request(req, reqlen, OpType::EVENT_REG_CALLBACK, &optype, &name);
-  if (ret != TS_ERR_OKAY) {
-    goto done;
-  }
-
-  // mark the specified alarm as "wanting to be notified" in the client's alarm_registered list
-  if (strlen(name) == 0) { // mark all alarms
-    for (bool &i : client->events_registered) {
-      i = true;
-    }
-  } else {
-    int id = get_event_id(name);
-    if (id < 0) {
-      ret = TS_ERR_FAIL;
-      goto done;
-    }
-
-    client->events_registered[id] = true;
-  }
-
-  ret = TS_ERR_OKAY;
-
-done:
-  ats_free(name);
-  return ret;
-}
-
-/**************************************************************************
- * handle_event_unreg_callback
- *
- * purpose: handles request to unregister a callback for a specific event (or all events)
- * input: client - the client currently reading the msg from
- *        req    - the event_name
- * output: TS_ERR_xx
- * note: the req should be the event name; does not send reply to client
- *************************************************************************/
-static TSMgmtError
-handle_event_unreg_callback(EventClientT *client, void *req, size_t reqlen)
-{
-  MgmtMarshallInt optype;
-  MgmtMarshallString name = nullptr;
-  TSMgmtError ret;
-
-  ret = recv_mgmt_request(req, reqlen, OpType::EVENT_UNREG_CALLBACK, &optype, &name);
-  if (ret != TS_ERR_OKAY) {
-    goto done;
-  }
-
-  // mark the specified alarm as "wanting to be notified" in the client's alarm_registered list
-  if (strlen(name) == 0) { // mark all alarms
-    for (bool &i : client->events_registered) {
-      i = false;
-    }
-  } else {
-    int id = get_event_id(name);
-    if (id < 0) {
-      ret = TS_ERR_FAIL;
-      goto done;
-    }
-
-    client->events_registered[id] = false;
-  }
-
-  ret = TS_ERR_OKAY;
-
-done:
-  ats_free(name);
-  return ret;
-}
-
-/*-------------------------------------------------------------------------
-                             MAIN EVENT LOOP
- --------------------------------------------------------------------------*/
-
 /*********************************************************************
  * event_callback_main
  *
@@ -337,7 +200,7 @@ done:
  * to determine which CoreAPI call to make.
  *********************************************************************/
 void *
-event_callback_main(void *arg)
+server_ctrl_main(void *arg)
 {
   int ret;
   int *socket_fd;
@@ -366,13 +229,10 @@ event_callback_main(void *arg)
 
   fd_set selectFDs;                    // for select call
   InkHashTableEntry *con_entry;        // used to obtain fd to alarms mapping
-  EventClientT *client_entry;          // an entry of fd to alarms mapping
+  RPC_Client *client_entry;          // an entry of fd to alarms mapping
   InkHashTableIteratorState con_state; // used to iterate through hash table
   int fds_ready;                       // return value for select go here
   struct timeval timeout;
-
-  event_callbacks.registerCallback(OpType::EVENT_REG_CALLBACK, handle_event_reg_callback);
-  event_callbacks.registerCallback(OpType::EVENT_UNREG_CALLBACK, handle_event_unreg_callback);
 
   while (true) {
     // LINUX fix: to prevent hard-spin reset timeout on each loop
@@ -390,7 +250,7 @@ event_callback_main(void *arg)
 
     // iterate through all entries in hash table
     while (con_entry) {
-      client_entry = (EventClientT *)ink_hash_table_entry_value(accepted_clients, con_entry);
+      client_entry = (RPC_Client *)ink_hash_table_entry_value(accepted_clients, con_entry);
       if (client_entry->fd >= 0) { // add fd to select set
         FD_SET(client_entry->fd, &selectFDs);
       }
@@ -409,10 +269,10 @@ event_callback_main(void *arg)
         fds_ready--;
 
         // create a new instance of the fd to alarms registered mapping
-        EventClientT *new_client_con = new_event_client();
+        RPC_Client *new_client_con = new_event_client();
 
         if (!new_client_con) {
-          // Debug ("TS_Control_Main", "can't create new EventClientT for new connection");
+          // Debug ("TS_Control_Main", "can't create new RPC_Client for new connection");
         } else {
           // accept connection
           socklen_t addr_len = (sizeof(struct sockaddr));
@@ -428,7 +288,7 @@ event_callback_main(void *arg)
         // see if there are more fd to set - iterate through all entries in hash table
         con_entry = ink_hash_table_iterator_first(accepted_clients, &con_state);
         while (con_entry) {
-          client_entry = (EventClientT *)ink_hash_table_entry_value(accepted_clients, con_entry);
+          client_entry = (RPC_Client *)ink_hash_table_entry_value(accepted_clients, con_entry);
           // got information check
           if (client_entry->fd && FD_ISSET(client_entry->fd, &selectFDs)) {
             // SERVICE REQUEST - read the op and message into a buffer
@@ -489,7 +349,7 @@ event_callback_main(void *arg)
       // iterate through all entries in hash table, if any
       con_entry = ink_hash_table_iterator_first(accepted_clients, &con_state);
       while (con_entry) {
-        client_entry = (EventClientT *)ink_hash_table_entry_value(accepted_clients, con_entry);
+        client_entry = (RPC_Client *)ink_hash_table_entry_value(accepted_clients, con_entry);
         if (client_entry->events_registered[event->id]) {
           OpType optype           = OpType::EVENT_NOTIFY;
           MgmtMarshallString name = event->name;
@@ -517,7 +377,7 @@ event_callback_main(void *arg)
   // iterate through hash table; close client socket connections and remove entry
   con_entry = ink_hash_table_iterator_first(accepted_clients, &con_state);
   while (con_entry) {
-    client_entry = (EventClientT *)ink_hash_table_entry_value(accepted_clients, con_entry);
+    client_entry = (RPC_Client *)ink_hash_table_entry_value(accepted_clients, con_entry);
     if (client_entry->fd >= 0) {
       close_socket(client_entry->fd);
     }
@@ -530,29 +390,4 @@ event_callback_main(void *arg)
 
   ink_thread_exit(nullptr);
   return nullptr;
-}
-
-static TSMgmtError
-handle_event_message(EventClientT *client, void *req, size_t reqlen)
-{
-  OpType optype = extract_mgmt_request_optype(req, reqlen);
-
-  if (mgmt_has_peereid()) {
-    uid_t euid = -1;
-    gid_t egid = -1;
-
-    // For now, all event messages require privilege. This is compatible with earlier
-    // versions of Traffic Server that always required privilege.
-    if (mgmt_get_peereid(client->fd, &euid, &egid) == -1 || (euid != 0 && euid != geteuid())) {
-      return TS_ERR_PERMISSION_DENIED;
-    }
-  }
-
-  EventMgmtCallback* cb = event_callbacks.getCallback(optype);
-  if(cb == nullptr) {
-    mgmt_elog(0, "%s: missing handler for type %d event message\n", __func__, (int)optype);
-    return TS_ERR_PARAMS;
-
-  }
-  return (*cb)(client, req, reqlen);
 }

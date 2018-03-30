@@ -40,6 +40,13 @@ typedef struct {
   struct sockaddr *adr;
 } ClientT;
 
+typedef struct control_message_handler {
+  unsigned flags;
+  TSMgmtError (*handler)(int, void *, size_t);
+} ControlHandler;
+
+void register_new_callback(OpType op, ControlHandler ch);
+
 void *ts_ctrl_main(void *arg);
 
 #endif

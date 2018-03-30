@@ -32,6 +32,8 @@
 #include "mgmtapi.h"
 #include "ts/Tokenizer.h"
 
+#include "LifeCycle.h"
+
 // for buffer used temporarily to parse incoming commands.
 #ifndef MAX_BUF_SIZE
 #define MAX_BUF_SIZE 4098
@@ -53,7 +55,7 @@ TSMgmtError Bounce(unsigned options);                                           
 TSMgmtError Stop(unsigned options);                                                // stop traffic_server
 TSMgmtError Drain(unsigned options);                                               // drain requests of traffic_server
 TSMgmtError StorageDeviceCmdOffline(const char *dev);                              // Storage device operation.
-TSMgmtError LifecycleMessage(const char *tag, void const *data, size_t data_size); // Lifecycle alert to plugins.
+//TSMgmtError LifecycleMessage(const char *tag, void const *data, size_t data_size); // Lifecycle alert to plugins.
 
 /***************************************************************************
  * Record Operations
