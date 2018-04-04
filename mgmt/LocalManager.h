@@ -62,6 +62,12 @@ enum ManagementPendingOperation {
 
 class LocalManager : public BaseManager
 {
+  typedef struct {
+    int fd;
+    pid_t pid;
+    struct sockaddr *adr;
+  } ClientProcess;
+
 public:
   explicit LocalManager(bool proxy_on);
   ~LocalManager();
@@ -124,7 +130,7 @@ public:
   char *env_prep;
 
   int process_server_sockfd = ts::NO_FD;
-  int watched_process_fd    = ts::NO_FD;
+  int traffic_server_fd    = ts::NO_FD;
 #if HAVE_EVENTFD
   int wakeup_fd = ts::NO_FD; // external trigger to stop polling
 #endif
@@ -133,14 +139,24 @@ public:
   Alarms *alarm_keeper     = nullptr;
   FileManager *configFiles = nullptr;
 
-  pid_t watched_process_pid = -1;
+  pid_t traffic_server_pid = -1;
 
   int syslog_facility = LOG_DAEMON;
 
 #if TS_HAS_WCCP
   wccp::Cache wccp_cache;
 #endif
+
+  RecBool disable_modification = false;
 private:
+  std::unordered_set<int> clientFds; // a list of all accepted client connections
+
+  struct ControlHandler {
+    unsigned flags;
+    TSMgmtError (*handler)(int, void *, size_t); // it is the responsibility of the callback to get the parameters from the stream. 
+  }
+  MgmtHashTable<OpType, ControlHandler> control_callbacks;
+  void registerControlCallback(OpType op, ControlHandler ch); 
 }; /* End class LocalManager */
 
 extern LocalManager *lmgmt;

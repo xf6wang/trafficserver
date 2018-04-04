@@ -297,6 +297,39 @@ LocalManager::initMgmtProcessServer()
   RecSetRecordInt("proxy.node.restarts.manager.start_time", manager_started_at, REC_SOURCE_DEFAULT);
 }
 
+static TSMgmtError
+LocalManager::handle_control_message(int fd, void *req, size_t reqlen)
+{
+  OpType optype = extract_mgmt_request_optype(req, reqlen);
+  TSMgmtError error;
+
+  ControlHandler* ch = control_callbacks.getCallback(optype);
+
+  if (mgmt_has_peereid()) {
+    uid_t euid = -1;
+    gid_t egid = -1;
+
+    // For privileged calls, ensure we have caller credentials and that the caller is privileged.
+    if (ch->flags & MGMT_API_PRIVILEGED) {
+      if (mgmt_get_peereid(fd, &euid, &egid) == -1 || (euid != 0 && euid != geteuid())) {
+        Debug("ts_main", "denied privileged API access on fd=%d for uid=%d gid=%d", fd, euid, egid);
+        return send_mgmt_error(fd, optype, TS_ERR_PERMISSION_DENIED);
+      }
+    }
+  }
+
+  Debug("ts_main", "handling message type=%d ptr=%p len=%zu on fd=%d", static_cast<int>(optype), req, reqlen, fd);
+
+  error =  ch->handler(fd, req, reqlen);
+  if (error != TS_ERR_OKAY) {
+    // NOTE: if the error was produced by the handler sending a response, this could attempt to
+    // send a response again. However, this would only happen if sending the response failed, so
+    // it is safe to fail to send it again here ...
+    return send_mgmt_error(fd, optype, error);
+  }
+
+  return TS_ERR_OKAY;
+
 /*
  * pollMgmtProcessServer()
  * -  Function checks the mgmt process server for new processes
@@ -320,11 +353,13 @@ LocalManager::pollMgmtProcessServer()
     FD_ZERO(&fdlist);
 
     if (process_server_sockfd != ts::NO_FD) {
-      FD_SET(process_server_sockfd, &fdlist);
+      FD_SET(process_server_sockfd, &fdlist); // socket for external sockets to connect to. 
     }
 
-    if (watched_process_fd != ts::NO_FD) {
-      FD_SET(watched_process_fd, &fdlist);
+    for(auto const &client_fd : clientFds) {
+      if(client_fd != TS::NO_FD) {
+        FD_SET(client_fd, &fdlist); 
+      }
     }
 
 #if TS_HAS_WCCP
@@ -373,103 +408,128 @@ LocalManager::pollMgmtProcessServer()
         keep_polling = true;
       }
 #endif
+        if (process_server_sockfd != ts::NO_FD && FD_ISSET(process_server_sockfd, &fdlist)) { /* New connection */
+          struct sockaddr_in clientAddr;
+          socklen_t clientLen = sizeof(clientAddr);
+          int new_sockfd      = mgmt_accept(process_server_sockfd, (struct sockaddr *)&clientAddr, &clientLen);
 
-      if (process_server_sockfd != ts::NO_FD && FD_ISSET(process_server_sockfd, &fdlist)) { /* New connection */
-        struct sockaddr_in clientAddr;
-        socklen_t clientLen = sizeof(clientAddr);
-        int new_sockfd      = mgmt_accept(process_server_sockfd, (struct sockaddr *)&clientAddr, &clientLen);
+          mgmt_log("[LocalManager::pollMgmtProcessServer] New process connecting fd '%d'\n", new_sockfd);
 
-        mgmt_log("[LocalManager::pollMgmtProcessServer] New process connecting fd '%d'\n", new_sockfd);
-
-        if (new_sockfd < 0) {
-          mgmt_elog(errno, "[LocalManager::pollMgmtProcessServer] ==> ");
-        } else if (!processRunning()) {
-          watched_process_fd = new_sockfd;
-        } else {
-          close_socket(new_sockfd);
-        }
-        --num;
-        keep_polling = true;
-      }
-
-      if (ts::NO_FD != watched_process_fd && FD_ISSET(watched_process_fd, &fdlist)) {
-        int res;
-        MgmtMessageHdr mh_hdr;
-        MgmtMessageHdr *mh_full;
-        char *data_raw;
-
-        keep_polling = true;
-
-        // read the message
-        if ((res = mgmt_read_pipe(watched_process_fd, (char *)&mh_hdr, sizeof(MgmtMessageHdr))) > 0) {
-          mh_full = (MgmtMessageHdr *)alloca(sizeof(MgmtMessageHdr) + mh_hdr.data_len);
-          memcpy(mh_full, &mh_hdr, sizeof(MgmtMessageHdr));
-          data_raw = (char *)mh_full + sizeof(MgmtMessageHdr);
-          if ((res = mgmt_read_pipe(watched_process_fd, data_raw, mh_hdr.data_len)) > 0) {
-            handleMgmtMsgFromProcesses(mh_full);
-          } else if (res < 0) {
-            mgmt_fatal(0, "[LocalManager::pollMgmtProcessServer] Error in read (errno: %d)\n", -res);
-          }
-        } else if (res < 0) {
-          mgmt_fatal(0, "[LocalManager::pollMgmtProcessServer] Error in read (errno: %d)\n", -res);
-        }
-
-        // handle EOF
-        if (res == 0) {
-          int estatus;
-          pid_t tmp_pid = watched_process_pid;
-
-          Debug("lm", "[LocalManager::pollMgmtProcessServer] Lost process EOF!");
-
-          close_socket(watched_process_fd);
-
-          waitpid(watched_process_pid, &estatus, 0); /* Reap child */
-          if (WIFSIGNALED(estatus)) {
-            int sig = WTERMSIG(estatus);
-            mgmt_log("[LocalManager::pollMgmtProcessServer] Server Process terminated due to Sig %d: %s\n", sig, strsignal(sig));
-          } else if (WIFEXITED(estatus)) {
-            int return_code = WEXITSTATUS(estatus);
-
-            // traffic_server's exit code will be UNRECOVERABLE_EXIT if it calls
-            // ink_emergency() or ink_emergency_va(). The call signals that traffic_server
-            // cannot be recovered with a reboot. In other words, catastrophic failure.
-            if (return_code == UNRECOVERABLE_EXIT) {
-              proxy_recoverable = false;
-            }
-          }
-
-          if (lmgmt->run_proxy) {
-            mgmt_log("[Alarms::signalAlarm] Server Process was reset\n");
-            lmgmt->alarm_keeper->signalAlarm(MGMT_ALARM_PROXY_PROCESS_DIED, nullptr);
+          if (new_sockfd < 0) {
+            mgmt_elog(errno, "[LocalManager::pollMgmtProcessServer] ==> ");
+          } else if (!processRunning()) {
+            clientFds.push_back(new_sockfd);
           } else {
-            mgmt_log("[TrafficManager] Server process shutdown\n");
+            close_socket(new_sockfd);
           }
-
-          watched_process_fd = watched_process_pid = -1;
-          if (tmp_pid != -1) { /* Incremented after a pid: message is sent */
-            proxy_running--;
-          }
-          proxy_started_at = -1;
-          RecSetRecordInt("proxy.node.proxy_running", 0, REC_SOURCE_DEFAULT);
+          --num;
+          keep_polling = true;
         }
+        for(auto client_fd : clientFds) {
+          if (ts::NO_FD != client_fd && FD_ISSET(client_fd, &fdlist)) {
+            int res;
+            MgmtMessageHdr mh_hdr;
+            MgmtMessageHdr *mh_full;
+            char *data_raw;
 
-        --num;
-      }
+            keep_polling = true;
+            void *req;
+            size_t reqlen;
 
+            ret = preprocess_msg(client_fd, &req, &reqlen);
+            if (ret == TS_ERR_NET_READ || ret == TS_ERR_NET_EOF) {
+              // occurs when remote API client terminates connection
+              mgmt_log("[LocalManager::pollMgmtProcessServer] ERROR: preprocess_msg - remove client %d ", client_fd);
+              clientFds.erase(client_fd);
+              continue; // next client
+            }
+
+            ret = handle_control_message(client_fd, req, reqlen);
+            ats_free(req);
+
+            if (ret != TS_ERR_OKAY) {
+              Debug("ts_main", "[ts_ctrl_main] ERROR: sending response for message (%d)", ret);
+
+              // XXX this doesn't actually send a error response ...
+
+              remove_client(client_entry, accepted_con);
+              con_entry = ink_hash_table_iterator_next(accepted_con, &con_state);
+              continue;
+            }
+
+            //read the message
+            if ((res = mgmt_read_pipe(client_fd, (char *)&mh_hdr, sizeof(MgmtMessageHdr))) > 0) {
+              mh_full = (MgmtMessageHdr *)alloca(sizeof(MgmtMessageHdr) + mh_hdr.data_len);
+              memcpy(mh_full, &mh_hdr, sizeof(MgmtMessageHdr));
+              data_raw = (char *)mh_full + sizeof(MgmtMessageHdr);
+              if ((res = mgmt_read_pipe(client_fd, data_raw, mh_hdr.data_len)) > 0) {
+                handleMgmtMsgFromProcesses(mh_full);
+              } else if (res < 0) {
+                mgmt_log("[LocalManager::pollMgmtProcessServer] Error in read (errno: %d)\n", -res);
+                clientFds.erase(client_fd);
+              }
+            } else if (res < 0) {
+              mgmt_log("[LocalManager::pollMgmtProcessServer] Error in read (errno: %d)\n", -res);
+              clientFds.erase(client_fd);
+            }
+
+            ats_free(mh_full);
+
+            // handle EOF
+            if (res == 0) {
+              int estatus;
+              pid_t tmp_pid = watched_process_pid;
+
+              Debug("lm", "[LocalManager::pollMgmtProcessServer] Lost process EOF!");
+
+              close_socket(client_fd);
+
+              waitpid(watched_process_pid, &estatus, 0); /* Reap child */
+              if (WIFSIGNALED(estatus)) {
+                int sig = WTERMSIG(estatus);
+                mgmt_log("[LocalManager::pollMgmtProcessServer] Server Process terminated due to Sig %d: %s\n", sig, strsignal(sig));
+              } else if (WIFEXITED(estatus)) {
+                int return_code = WEXITSTATUS(estatus);
+
+                // traffic_server's exit code will be UNRECOVERABLE_EXIT if it calls
+                // ink_emergency() or ink_emergency_va(). The call signals that traffic_server
+                // cannot be recovered with a reboot. In other words, catastrophic failure.
+                if (return_code == UNRECOVERABLE_EXIT) {
+                  proxy_recoverable = false;
+                }
+              }
+
+              if (lmgmt->run_proxy) {
+                mgmt_log("[Alarms::signalAlarm] Server Process was reset\n");
+                lmgmt->alarm_keeper->signalAlarm(MGMT_ALARM_PROXY_PROCESS_DIED, nullptr);
+              } else {
+                mgmt_log("[TrafficManager] Server process shutdown\n");
+              }
+
+              client_fd = watched_process_pid = -1;
+              if (tmp_pid != -1) { /* Incremented after a pid: message is sent */
+                proxy_running--;
+              }
+              proxy_started_at = -1;
+              RecSetRecordInt("proxy.node.proxy_running", 0, REC_SOURCE_DEFAULT);
+            }
+
+            --num;
+          }
+        }
 #if HAVE_EVENTFD
-      if (wakeup_fd != ts::NO_FD && FD_ISSET(wakeup_fd, &fdlist)) {
-        if (!keep_polling) {
-          // read or else fd will always be set.
-          uint64_t ignore;
-          ATS_UNUSED_RETURN(read(wakeup_fd, &ignore, sizeof(uint64_t)));
-          return;
+        if (wakeup_fd != ts::NO_FD && FD_ISSET(wakeup_fd, &fdlist)) {
+          if (!keep_polling) {
+            // read or else fd will always be set.
+            uint64_t ignore;
+            ATS_UNUSED_RETURN(read(wakeup_fd, &ignore, sizeof(uint64_t)));
+            return;
+          }
+          --num;
         }
-        --num;
-      }
 #else
-      (void)keep_polling; // suppress compiler warning
+        (void)keep_polling; // suppress compiler warning
 #endif
-
       ink_assert(num == 0); /* Invariant */
     }
   }
