@@ -39,6 +39,7 @@
 #include "MgmtUtils.h"
 #include "BaseManager.h"
 #include "ts/ink_sock.h"
+#include "ClientControl.h"
 
 #include "ts/ink_apidefs.h"
 #include <functional>
@@ -82,6 +83,8 @@ private:
   int processSignalQueue();
   bool processEventQueue();
 
+  int sendMgmtMsgToSocket(int fd, MgmtMessageHdr *mh);
+
   bool require_lm;
   RecInt timeout;
   LLQ *mgmt_signal_queue;
@@ -94,12 +97,15 @@ private:
   /// This allows @c traffic_server and @c traffic_manager to perform different initialization in the thread.
   std::function<void()> init;
 
-  int local_manager_sockfd;
+  int local_manager_sockfd = ts::NO_FD;
+  int rpc_sockfd           = ts::NO_FD;
 #if HAVE_EVENTFD
   int wakeup_fd; // external trigger to stop polling
 #endif
   ConfigUpdateCbTable *cbtable;
   int max_msgs_in_a_row;
+
+  RPCClientController *client;
 
   static const int MAX_MSGS_IN_A_ROW = 10000;
   static void *processManagerThread(void *arg);

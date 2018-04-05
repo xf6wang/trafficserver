@@ -56,6 +56,7 @@ data_is_nul_terminated(const MgmtMarshallData *data)
 static ssize_t
 socket_read_bytes(int fd, void *buf, size_t needed)
 {
+  void *start = buf;
   size_t nread = 0;
 
   // makes sure the descriptor is readable
@@ -84,6 +85,7 @@ socket_read_bytes(int fd, void *buf, size_t needed)
     nread += ret;
   }
 
+  buf = start;
   return nread;
 }
 

@@ -31,6 +31,8 @@
 #include "MgmtSocket.h"
 #include "ts/I_Layout.h"
 
+#define MGMTAPI_MGMT_SOCKET_NAME "mgmtapi.sock"
+
 /*
  * Global ProcessManager
  */
@@ -118,6 +120,8 @@ ProcessManager::stop()
     close_socket(tmp);
   }
 #endif
+
+  delete client;
 
   ink_thread_kill(poll_thread, SIGINT);
 
@@ -270,19 +274,39 @@ ProcessManager::processSignalQueue()
   while (!queue_is_empty(mgmt_signal_queue)) {
     MgmtMessageHdr *mh = (MgmtMessageHdr *)dequeue(mgmt_signal_queue);
 
-    Debug("pmgmt", "signaling local manager with message ID %d", mh->msg_id);
-
-    if (require_lm) {
-      int ret = mgmt_write_pipe(local_manager_sockfd, (char *)mh, sizeof(MgmtMessageHdr) + mh->data_len);
-      ats_free(mh);
-
-      if (ret < 0) {
-        return ret;
-      }
+    int ret = sendMgmtMsgToSocket(client->fd(), mh);
+    if(ret < 0) {
+      return ret;
     }
   }
-
   return 0;
+}
+
+int
+ProcessManager::sendMgmtMsgToSocket(int fd, MgmtMessageHdr *mh)
+{
+  static const MgmtMarshallType fields[] = {MGMT_MARSHALL_INT, MGMT_MARSHALL_STRING};
+  MgmtMarshallInt msgid       = mh->msg_id;
+  MgmtMarshallString data_raw = reinterpret_cast<MgmtMarshallString>((char *)mh + sizeof(MgmtMessageHdr));
+
+  Debug("pmgmt", "signaling local manager with message ID %d", mh->msg_id);
+
+  if (require_lm) {
+    const MgmtMarshallType datafield[] = {MGMT_MARSHALL_DATA};
+
+    MgmtMarshallInt msg_len = mgmt_message_length(fields, countof(fields), &msgid, &data_raw);
+    MgmtMarshallData req;
+    req.len = msg_len;
+    req.ptr = static_cast<char *>(ats_malloc(msg_len));
+
+    mgmt_message_marshall(req.ptr, req.len, fields, countof(fields), &msgid, &data_raw);
+
+    int ret = mgmt_message_write(fd, datafield, countof(datafield), &req);
+    return ret;
+  }
+  return 0;
+
+  
 }
 
 void
@@ -290,6 +314,7 @@ ProcessManager::initLMConnection()
 {
   std::string rundir(RecConfigReadRuntimeDir());
   std::string sockpath(Layout::relative_to(rundir, LM_CONNECTION_SERVER));
+  std::string apisock(Layout::relative_to(rundir, MGMTAPI_MGMT_SOCKET_NAME)); // connect to RPC
 
   MgmtMessageHdr *mh_full;
   int data_len;
@@ -302,7 +327,11 @@ ProcessManager::initLMConnection()
     Fatal("Unable to create socket '%s': %s", sockpath.c_str(), strerror(errno));
   }
 
-  /* Setup Connection to LocalManager */
+  if (apisock.length() > sizeof(serv_addr.sun_path) - 1) {
+    Fatal("Unable to create socket '%s': %s", apisock.c_str(), strerror(errno));
+  }
+  
+  /* Setup Connection to LocalManager (to recieve messages) */
   memset((char *)&serv_addr, 0, sizeof(serv_addr));
   serv_addr.sun_family = AF_UNIX;
 
@@ -325,6 +354,8 @@ ProcessManager::initLMConnection()
     Fatal("failed to connect management socket '%s': %s", sockpath.c_str(), strerror(errno));
   }
 
+  client = new RPCClientController();
+  
 #if HAVE_EVENTFD
   wakeup_fd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
   if (wakeup_fd < 0) {
@@ -339,7 +370,7 @@ ProcessManager::initLMConnection()
 
   memcpy((char *)mh_full + sizeof(MgmtMessageHdr), &(pid), data_len);
 
-  if (mgmt_write_pipe(local_manager_sockfd, (char *)mh_full, sizeof(MgmtMessageHdr) + data_len) <= 0) {
+  if(sendMgmtMsgToSocket(client->fd(), mh_full) < 0) {
     Fatal("error writing message: %s", strerror(errno));
   }
 }

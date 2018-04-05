@@ -25,11 +25,15 @@ AM_CPPFLAGS += \
   $(iocore_include_dirs) \
   -I$(abs_top_srcdir)/lib/records \
   -I$(abs_top_srcdir)/mgmt \
+  -I$(abs_top_srcdir)/mgmt/rpc \
   -I$(abs_top_srcdir)/mgmt/utils \
   -I$(abs_top_srcdir)/mgmt/api/include \
   -I$(abs_top_srcdir)/lib \
   $(TS_INCLUDES) \
   $(LIBUNWIND_CFLAGS)
+
+# header files used by other libraries
+EXTRA_DIST = NetworkMessage.h
 
 noinst_LTLIBRARIES = libmgmtapilocal.la libmgmtapi.la
 lib_LTLIBRARIES = libtsmgmt.la
@@ -45,7 +49,7 @@ libmgmtapi_la_SOURCES = \
   INKMgmtAPI.cc \
   NetworkMessage.cc \
   NetworkMessage.h \
-  include/mgmtapi.h
+  include/mgmtapi.h 
 
 if BUILD_TESTS
   noinst_PROGRAMS = traffic_api_cli_remote
@@ -73,7 +77,7 @@ libtsmgmt_la_LDFLAGS = -no-undefined -version-info @TS_LIBTOOL_VERSION@
 libtsmgmt_la_LIBADD = @LIBOBJS@ \
   libmgmtapi.la \
   $(top_builddir)/lib/ts/libtsutil.la \
-  $(top_builddir)/mgmt/utils/libutils_p.la
+  $(top_builddir)/mgmt/utils/libutils_p.la 
 
 if BUILD_TESTS
   traffic_api_cli_remote_SOURCES = APITestCliRemote.cc
@@ -82,6 +86,7 @@ endif
 traffic_api_cli_remote_LDADD = \
   libtsmgmt.la \
   $(top_builddir)/lib/ts/libtsutil.la \
+  $(top_builddir)/iocore/eventsystem/libinkevent.a \
   @LIBTCL@ @OPENSSL_LIBS@
 
 clang-tidy-local: $(DIST_SOURCES)

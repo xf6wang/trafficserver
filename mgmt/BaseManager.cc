@@ -39,6 +39,7 @@
 BaseManager::BaseManager()
 {
   /* Setup the event queue and callback tables */
+
   mgmt_event_queue    = create_queue();
   mgmt_callback_table = ink_hash_table_create(InkHashTableKeyType_Word);
 

@@ -23,6 +23,8 @@
 
 #pragma once
 
+#include "ServerControl.h"
+
 extern int aconf_port_arg;
 
 void *mgmt_synthetic_main(void *);

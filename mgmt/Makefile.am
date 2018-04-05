@@ -17,7 +17,7 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 
-SUBDIRS = utils api
+SUBDIRS = utils api rpc
 
 # Decoder ring:
 # 	libmgmt_c.la 	Configuration records (defaults).
@@ -27,7 +27,9 @@ noinst_LTLIBRARIES = libmgmt_c.la libmgmt_p.la libmgmt_lm.la
 
 AM_CPPFLAGS += \
   $(iocore_include_dirs) \
+  -I$(abs_top_srcdir)/mgmt/api \
   -I$(abs_top_srcdir)/mgmt/api/include \
+  -I$(abs_top_srcdir)/mgmt/rpc \
   -I$(abs_top_srcdir)/mgmt/utils \
   -I$(abs_top_srcdir)/proxy \
   -I$(abs_top_srcdir)/proxy/http \
@@ -51,7 +53,7 @@ libmgmt_p_la_SOURCES = \
   ProcessManager.cc \
   ProcessManager.h \
   ProxyConfig.cc \
-  ProxyConfig.h
+  ProxyConfig.h 
 
 libmgmt_lm_la_SOURCES = \
   $(libmgmt_COMMON) \
@@ -68,11 +70,13 @@ libmgmt_lm_la_SOURCES = \
 
 libmgmt_lm_la_LIBADD = \
   libmgmt_c.la \
-  $(top_builddir)/mgmt/utils/libutils_lm.la
+  $(top_builddir)/mgmt/utils/libutils_lm.la \
+  $(top_builddir)/mgmt/rpc/librpc.la
 
 libmgmt_p_la_LIBADD = \
   libmgmt_c.la \
-  $(top_builddir)/mgmt/utils/libutils_p.la
+  $(top_builddir)/mgmt/utils/libutils_p.la \
+  $(top_builddir)/mgmt/rpc/librpc.la
 
 include $(top_srcdir)/build/tidy.mk
 

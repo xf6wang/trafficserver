@@ -1,6 +1,6 @@
 /** @file
 
-  Public REC_SIGNAL defines
+  A brief file description
 
   @section license License
 
@@ -20,28 +20,17 @@
   See the License for the specific language governing permissions and
   limitations under the License.
  */
+#ifndef _MGMT_CALLBACK_TYPES_H
+#define _MGMT_CALLBACK_TYPES_H
 
-#pragma once
+/* SHOULD EXACTLY MATCH CallbackTypes.h */
 
-// copy from mgmt/BaseManager.h
-#define REC_SIGNAL_PID 100
-#define REC_SIGNAL_MACHINE_UP 101
-#define REC_SIGNAL_MACHINE_DOWN 102
-#define REC_SIGNAL_CONFIG_ERROR 103
-#define REC_SIGNAL_SYSTEM_ERROR 104
-#define REC_SIGNAL_LOG_SPACE_CRISIS 105
-#define REC_SIGNAL_CONFIG_FILE_READ 106
-#define REC_SIGNAL_CACHE_ERROR 107
-#define REC_SIGNAL_CACHE_WARNING 108
-#define REC_SIGNAL_LOGGING_ERROR 109
-#define REC_SIGNAL_LOGGING_WARNING 110
-// Currently unused: 11
-#define REC_SIGNAL_PLUGIN_CONFIG_REG 112
-#define REC_SIGNAL_PLUGIN_ADD_REC 113
-#define REC_SIGNAL_PLUGIN_SET_CONFIG 114
-#define REC_SIGNAL_LOG_FILES_ROLLED 115
-#define REC_SIGNAL_LIBRECORDS 116
-#define REC_SIGNAL_HTTP_CONGESTED_SERVER 120
-#define REC_SIGNAL_HTTP_ALLEVIATED_SERVER 121
+struct ControlHandler {
+  unsigned flags;
+  TSMgmtError (*handler)(int, void *, size_t);
+};
 
-#define MGMTAPI_SOCKET_NAME "mgmtapi.sock"
+#define MGMT_CONTROL_FUNCTION 0
+#define MGMT_LM_CALLBACK 1
+
+#endif /* _MGMT_CALLBACK_TYPES_H */

@@ -31,6 +31,7 @@
 #include "P_RecFile.h"
 #include "LocalManager.h"
 #include "FileManager.h"
+#include "ServerControl.h"
 
 // Marks whether the message handler has been initialized.
 static bool message_initialized_p = false;

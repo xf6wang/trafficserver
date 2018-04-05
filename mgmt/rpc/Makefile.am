@@ -19,28 +19,36 @@
 
 AM_CPPFLAGS += \
   $(iocore_include_dirs) \
-  -I$(abs_top_srcdir)/lib \
-  -I$(abs_top_srcdir)/lib/records \
   -I$(abs_top_srcdir)/mgmt \
+  -I$(abs_top_srcdir)/mgmt/api \
+  -I$(abs_top_srcdir)/mgmt/utils \
   -I$(abs_top_srcdir)/mgmt/api/include \
-  $(TS_INCLUDES)
+  -I$(abs_top_srcdir)/lib/tsconfig \
+  -I$(abs_top_srcdir)/proxy \
+  -I$(abs_top_srcdir)/proxy/http \
+  -I$(abs_top_srcdir)/proxy/hdrs \
+  -I$(abs_top_srcdir)/lib/records \
+  -I$(abs_top_srcdir)/lib \
+  $(TS_INCLUDES) \
+  @OPENSSL_INCLUDES@
 
-AM_LDFLAGS += \
-  @OPENSSL_LDFLAGS@
+# header files used by other libraries
+# EXTRA_DIST = MgmtHashTable.h MgmtSocket.h
 
-bin_PROGRAMS = traffic_cop
+noinst_LTLIBRARIES = librpc.la
 
-traffic_cop_SOURCES = \
-  traffic_cop.cc
+librpc_la_SOURCES = \
+  MgmtSignals.h \
+  ServerControl.cc \
+  ServerControl.h \
+  ClientControl.cc \
+  ClientControl.h
 
-traffic_cop_LDADD = \
-  $(top_builddir)/mgmt/libmgmt_c.la \
-  $(top_builddir)/mgmt/api/libtsmgmt.la \
-  $(top_builddir)/lib/ts/libtsutil.la \
-  $(top_builddir)/lib/records/librecords_cop.a \
-  $(top_builddir)/iocore/eventsystem/libinkevent.a  
+#librpc_la_LIBADD = \
+#  $(top_builddir)/lib/ts/libtsutil.la 
+# $(top_builddir)/iocore/eventsystem/libinkevent.a 
 
 include $(top_srcdir)/build/tidy.mk
 
-clang-tidy-local: $(DIST_SOURCES)
+tidy-local: $(DIST_SOURCES)
 	$(CXX_Clang_Tidy)

@@ -18,10 +18,11 @@
 #  limitations under the License.
 
 AM_CPPFLAGS += \
-  -I$(abs_top_srcdir)/iocore/utils \
+  $(iocore_include_dirs) \
   -I$(abs_top_srcdir)/mgmt \
   -I$(abs_top_srcdir)/mgmt/api \
   -I$(abs_top_srcdir)/mgmt/api/include \
+  -I$(abs_top_srcdir)/mgmt/rpc \
   -I$(abs_top_srcdir)/lib/tsconfig \
   -I$(abs_top_srcdir)/proxy \
   -I$(abs_top_srcdir)/lib/records \

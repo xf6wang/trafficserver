@@ -31,13 +31,17 @@
 #include "MgmtSocket.h"
 #include "ts/ink_cap.h"
 #include "FileManager.h"
+#include "ServerControl.h"
 #include <ts/string_view.h>
+#include "mgmtapi.h"
 
 #if TS_USE_POSIX_CAP
 #include <sys/capability.h>
 #endif
 
 #define MGMT_OPT "-M"
+
+extern RPCServerController *rpc_server;
 
 void
 LocalManager::mgmtCleanup()
@@ -243,7 +247,7 @@ LocalManager::LocalManager(bool proxy_on) : BaseManager(), run_proxy(proxy_on)
     mgmt_log("[LocalManager::LocalManager] Unable to access() '%s': %d, %s\n", absolute_proxy_binary, errno, strerror(errno));
     mgmt_fatal(0, "[LocalManager::LocalManager] please set bin path 'proxy.config.bin_path' \n");
   }
-
+  
   return;
 }
 
@@ -295,6 +299,196 @@ LocalManager::initMgmtProcessServer()
 
   umask(oldmask);
   RecSetRecordInt("proxy.node.restarts.manager.start_time", manager_started_at, REC_SOURCE_DEFAULT);
+
+}
+
+static char* extract_data_raw(void* buf, size_t len) 
+{
+  static const MgmtMarshallType fields[] = {MGMT_MARSHALL_INT, MGMT_MARSHALL_STRING};
+  MgmtMarshallInt id;
+  MgmtMarshallString msg;
+
+  mgmt_message_parse(buf, len, fields, countof(fields), &id, &msg);
+  char* data_raw = static_cast<char*>(msg);
+  return data_raw;
+}
+
+void 
+LocalManager::loadRPCCallbacks(RPCServerController *rpc_server)
+{
+  rpc_server->registerControlCallback(MGMT_SIGNAL_PID, [this](int /* UNUSED */, void* buf, size_t len){
+    TSMgmtError err = (TSMgmtError)0;
+    static const MgmtMarshallType fields[] = {MGMT_MARSHALL_INT, MGMT_MARSHALL_STRING};
+    MgmtMarshallInt id;
+    MgmtMarshallString msg;
+
+    mgmt_message_parse(buf, len, fields, countof(fields), &id, &msg);
+    char* data_raw = static_cast<char*>(msg);
+
+    lmgmt->watched_process_pid = *((pid_t *)data_raw);
+    lmgmt->alarm_keeper->signalAlarm(MGMT_ALARM_PROXY_PROCESS_BORN, nullptr);
+    lmgmt->proxy_running++;
+    lmgmt->proxy_launch_pid         = -1;
+    lmgmt->proxy_launch_outstanding = false;
+    RecSetRecordInt("proxy.node.proxy_running", 1, REC_SOURCE_DEFAULT);
+    return err;
+  });
+  rpc_server->registerControlCallback(MGMT_SIGNAL_CONFIG_ERROR, [this](int /* UNUSED */, void* buf, size_t len){
+    char* data_raw = extract_data_raw(buf, len);
+    lmgmt->alarm_keeper->signalAlarm(MGMT_ALARM_PROXY_CONFIG_ERROR, data_raw);
+    return TS_ERR_OKAY;
+  });
+  rpc_server->registerControlCallback(MGMT_SIGNAL_SYSTEM_ERROR, [this](int /* UNUSED */, void* buf, size_t len){
+    char* data_raw = extract_data_raw(buf, len);
+    lmgmt->alarm_keeper->signalAlarm(MGMT_ALARM_PROXY_SYSTEM_ERROR, data_raw);
+    return TS_ERR_OKAY;
+  });
+  rpc_server->registerControlCallback(MGMT_SIGNAL_LOG_SPACE_CRISIS, [this](int /* UNUSED */, void* buf, size_t len){
+    char* data_raw = extract_data_raw(buf, len);
+    lmgmt->alarm_keeper->signalAlarm(MGMT_ALARM_PROXY_LOG_SPACE_CRISIS, data_raw);
+    return TS_ERR_OKAY;
+  });
+  rpc_server->registerControlCallback(MGMT_SIGNAL_CACHE_ERROR, [this](int /* UNUSED */, void* buf, size_t len){
+    char* data_raw = extract_data_raw(buf, len);
+    lmgmt->alarm_keeper->signalAlarm(MGMT_ALARM_PROXY_CACHE_ERROR, data_raw);
+    return TS_ERR_OKAY;
+  });
+  rpc_server->registerControlCallback(MGMT_SIGNAL_CACHE_WARNING, [this](int /* UNUSED */, void* buf, size_t len){
+    char* data_raw = extract_data_raw(buf, len);
+    lmgmt->alarm_keeper->signalAlarm(MGMT_ALARM_PROXY_CACHE_WARNING, data_raw);
+    return TS_ERR_OKAY;
+  });
+  rpc_server->registerControlCallback(MGMT_SIGNAL_LOGGING_ERROR, [this](int /* UNUSED */, void* buf, size_t len){
+    char* data_raw = extract_data_raw(buf, len);
+    lmgmt->alarm_keeper->signalAlarm(MGMT_ALARM_PROXY_LOGGING_ERROR, data_raw);
+    return TS_ERR_OKAY;
+  });
+  rpc_server->registerControlCallback(MGMT_SIGNAL_LOGGING_WARNING, [this](int /* UNUSED */, void* buf, size_t len){
+    char* data_raw = extract_data_raw(buf, len);
+    lmgmt->alarm_keeper->signalAlarm(MGMT_ALARM_PROXY_LOGGING_WARNING, data_raw);
+    return TS_ERR_OKAY;
+  });
+  rpc_server->registerControlCallback(MGMT_SIGNAL_CONFIG_FILE_READ, [this](int /* UNUSED */, void* buf, size_t len){
+    char* data_raw = extract_data_raw(buf, len);
+    mgmt_log("[LocalManager::handleMgmtMsgFromProcesses] File done '%d'\n", data_raw);
+    return TS_ERR_OKAY;
+  });
+  rpc_server->registerControlCallback(MGMT_SIGNAL_PLUGIN_SET_CONFIG, [this](int /* UNUSED */, void* buf, size_t len){
+    char* data_raw = extract_data_raw(buf, len);
+    char var_name[256];
+    char var_value[256];
+    MgmtType stype;
+    // stype is an enum type, so cast to an int* to avoid warnings. /leif
+    int tokens = sscanf(data_raw, "%255s %d %255s", var_name, (int *)&stype, var_value);
+    if (tokens != 3) {
+      stype = MGMT_INVALID;
+    }
+    switch (stype) {
+    case MGMT_INT:
+      RecSetRecordInt(var_name, ink_atoi64(var_value), REC_SOURCE_EXPLICIT);
+      break;
+    case MGMT_COUNTER:
+    case MGMT_FLOAT:
+    case MGMT_STRING:
+    case MGMT_INVALID:
+    default:
+      mgmt_log("[LocalManager::handleMgmtMsgFromProcesses] "
+               "Invalid plugin set-config msg '%s'\n",
+               data_raw);
+      break;
+    }
+    return TS_ERR_OKAY;
+  });
+  rpc_server->registerControlCallback(MGMT_SIGNAL_LOG_FILES_ROLLED, [this](int /* UNUSED */, void* buf, size_t len){
+    char* data_raw = extract_data_raw(buf, len);
+    Debug("lm", "Rolling logs %s", (char *)data_raw);
+    return TS_ERR_OKAY;
+  });
+  rpc_server->registerControlCallback(MGMT_SIGNAL_LIBRECORDS, [this](int /* UNUSED */, void* buf, size_t len){
+    static const MgmtMarshallType fields[] = {MGMT_MARSHALL_INT, MGMT_MARSHALL_STRING};
+    MgmtMarshallInt id;
+    MgmtMarshallString msg;
+
+    mgmt_message_parse(buf, len, fields, countof(fields), &id, &msg);
+    char* data_raw = static_cast<char*>(msg);
+    if (len > 0) {
+      executeMgmtCallback(MGMT_SIGNAL_LIBRECORDS, data_raw, len);
+    } else {
+      executeMgmtCallback(MGMT_SIGNAL_LIBRECORDS, nullptr, 0);
+    }
+    return TS_ERR_OKAY;
+  });
+  rpc_server->registerControlCallback(MGMT_SIGNAL_HTTP_CONGESTED_SERVER, [this](int /* UNUSED */, void* buf, size_t len){
+    char* data_raw = extract_data_raw(buf, len);
+    lmgmt->alarm_keeper->signalAlarm(MGMT_ALARM_PROXY_HTTP_CONGESTED_SERVER, data_raw);
+    return TS_ERR_OKAY;
+  });
+  rpc_server->registerControlCallback(MGMT_ALARM_PROXY_HTTP_ALLEVIATED_SERVER, [this](int /* UNUSED */, void* buf, size_t len){
+    char* data_raw = extract_data_raw(buf, len);
+    lmgmt->alarm_keeper->signalAlarm(MGMT_ALARM_PROXY_HTTP_ALLEVIATED_SERVER, data_raw);
+    return TS_ERR_OKAY;
+  });
+
+  rpc_server->registerControlCallback(MGMT_SIGNAL_CONFIG_FILE_CHILD, [this](int /* UNUSED */, void* buf, size_t len){
+    char* data_raw = extract_data_raw(buf, len);
+    static const MgmtMarshallType fields[] = {MGMT_MARSHALL_STRING, MGMT_MARSHALL_STRING, MGMT_MARSHALL_INT};
+    char *parent                           = nullptr;
+    char *child                            = nullptr;
+    MgmtMarshallInt options                = 0;
+    if (mgmt_message_parse(data_raw, len, fields, countof(fields), &parent, &child, &options) != -1) {
+      lmgmt->configFiles->configFileChild(parent, child, (unsigned int)options);
+    } else {
+      mgmt_log("[LocalManager::handleMgmtMsgFromProcesses] "
+               "MGMT_SIGNAL_CONFIG_FILE_CHILD mgmt_message_parse error\n");
+    }
+    // Outpunt pointers are guaranteed to be NULL or valid.
+    ats_free_null(parent);
+    ats_free_null(child);
+    return TS_ERR_OKAY;
+  });
+  rpc_server->registerControlCallback(MGMT_SIGNAL_SAC_SERVER_DOWN, [this](int /* UNUSED */, void* buf, size_t len){
+    char* data_raw = extract_data_raw(buf, len);
+    lmgmt->alarm_keeper->signalAlarm(MGMT_ALARM_SAC_SERVER_DOWN, data_raw);
+    return TS_ERR_OKAY;
+  });
+
+  // rpc_server->registerEOFReaper( [this]() {
+  //   int estatus;
+  //   pid_t tmp_pid = lmgmt->watched_process_pid;
+
+  //   Debug("lm", "[LocalManager::pollMgmtProcessServer] Lost process EOF!");
+
+  //   close_socket(lmgmt->watched_process_fd);
+
+  //   waitpid(lmgmt->watched_process_pid, &estatus, 0); /* Reap child */
+  //   if (WIFSIGNALED(estatus)) {
+  //     int sig = WTERMSIG(estatus);
+  //     mgmt_log("[LocalManager::pollMgmtProcessServer] Server Process terminated due to Sig %d: %s\n", sig, strsignal(sig));
+  //   } else if (WIFEXITED(estatus)) {
+  //     int return_code = WEXITSTATUS(estatus);
+
+  //     // traffic_server's exit code will be UNRECOVERABLE_EXIT if it calls
+  //     // ink_emergency() or ink_emergency_va(). The call signals that traffic_server
+  //     // cannot be recovered with a reboot. In other words, catastrophic failure.
+  //     if (return_code == UNRECOVERABLE_EXIT) {
+  //       lmgmt->proxy_recoverable = false;
+  //     }
+  //   }
+
+  //   if (lmgmt->run_proxy) {
+  //     mgmt_log("[Alarms::signalAlarm] Server Process was reset\n");
+  //     lmgmt->alarm_keeper->signalAlarm(MGMT_ALARM_PROXY_PROCESS_DIED, nullptr);
+  //   } else {
+  //     mgmt_log("[TrafficManager] Server process shutdown\n");
+  //   }
+
+  //   lmgmt->watched_process_fd = lmgmt->watched_process_pid = -1;
+  //   if (tmp_pid != -1) { /* Incremented after a pid: message is sent */
+  //     lmgmt->proxy_running--;
+  //   }
+  //   lmgmt->proxy_started_at = -1;
+  //   RecSetRecordInt("proxy.node.proxy_running", 0, REC_SOURCE_DEFAULT);
+  // });
 }
 
 /*
@@ -472,132 +666,6 @@ LocalManager::pollMgmtProcessServer()
 
       ink_assert(num == 0); /* Invariant */
     }
-  }
-}
-
-void
-LocalManager::handleMgmtMsgFromProcesses(MgmtMessageHdr *mh)
-{
-  char *data_raw = (char *)mh + sizeof(MgmtMessageHdr);
-  switch (mh->msg_id) {
-  case MGMT_SIGNAL_PID:
-    watched_process_pid = *((pid_t *)data_raw);
-    lmgmt->alarm_keeper->signalAlarm(MGMT_ALARM_PROXY_PROCESS_BORN, nullptr);
-    proxy_running++;
-    proxy_launch_pid         = -1;
-    proxy_launch_outstanding = false;
-    RecSetRecordInt("proxy.node.proxy_running", 1, REC_SOURCE_DEFAULT);
-    break;
-
-  case MGMT_SIGNAL_MACHINE_UP:
-    /*
-       {
-       struct in_addr addr;
-       addr.s_addr = *((unsigned int*)data_raw);
-       alarm_keeper->signalAlarm(MGMT_ALARM_PROXY_PEER_BORN, inet_ntoa(addr));
-       }
-     */
-    break;
-  case MGMT_SIGNAL_MACHINE_DOWN:
-    /*
-       {
-       struct in_addr addr;
-       addr.s_addr = *((unsigned int*)data_raw);
-       alarm_keeper->signalAlarm(MGMT_ALARM_PROXY_PEER_DIED, inet_ntoa(addr));
-       }
-     */
-    break;
-
-  // FIX: This is very messy need to correlate mgmt signals and
-  // alarms better
-  case MGMT_SIGNAL_CONFIG_ERROR:
-    alarm_keeper->signalAlarm(MGMT_ALARM_PROXY_CONFIG_ERROR, data_raw);
-    break;
-  case MGMT_SIGNAL_SYSTEM_ERROR:
-    alarm_keeper->signalAlarm(MGMT_ALARM_PROXY_SYSTEM_ERROR, data_raw);
-    break;
-  case MGMT_SIGNAL_LOG_SPACE_CRISIS:
-    alarm_keeper->signalAlarm(MGMT_ALARM_PROXY_LOG_SPACE_CRISIS, data_raw);
-    break;
-  case MGMT_SIGNAL_CACHE_ERROR:
-    alarm_keeper->signalAlarm(MGMT_ALARM_PROXY_CACHE_ERROR, data_raw);
-    break;
-  case MGMT_SIGNAL_CACHE_WARNING:
-    alarm_keeper->signalAlarm(MGMT_ALARM_PROXY_CACHE_WARNING, data_raw);
-    break;
-  case MGMT_SIGNAL_LOGGING_ERROR:
-    alarm_keeper->signalAlarm(MGMT_ALARM_PROXY_LOGGING_ERROR, data_raw);
-    break;
-  case MGMT_SIGNAL_LOGGING_WARNING:
-    alarm_keeper->signalAlarm(MGMT_ALARM_PROXY_LOGGING_WARNING, data_raw);
-    break;
-  case MGMT_SIGNAL_CONFIG_FILE_READ:
-    mgmt_log("[LocalManager::handleMgmtMsgFromProcesses] File done '%d'\n", data_raw);
-    break;
-  case MGMT_SIGNAL_PLUGIN_SET_CONFIG: {
-    char var_name[256];
-    char var_value[256];
-    MgmtType stype;
-    // stype is an enum type, so cast to an int* to avoid warnings. /leif
-    int tokens = sscanf(data_raw, "%255s %d %255s", var_name, (int *)&stype, var_value);
-    if (tokens != 3) {
-      stype = MGMT_INVALID;
-    }
-    switch (stype) {
-    case MGMT_INT:
-      RecSetRecordInt(var_name, ink_atoi64(var_value), REC_SOURCE_EXPLICIT);
-      break;
-    case MGMT_COUNTER:
-    case MGMT_FLOAT:
-    case MGMT_STRING:
-    case MGMT_INVALID:
-    default:
-      mgmt_log("[LocalManager::handleMgmtMsgFromProcesses] "
-               "Invalid plugin set-config msg '%s'\n",
-               data_raw);
-      break;
-    }
-  } break;
-  case MGMT_SIGNAL_LOG_FILES_ROLLED: {
-    Debug("lm", "Rolling logs %s", (char *)data_raw);
-    break;
-  }
-  case MGMT_SIGNAL_LIBRECORDS:
-    if (mh->data_len > 0) {
-      executeMgmtCallback(MGMT_SIGNAL_LIBRECORDS, data_raw, mh->data_len);
-    } else {
-      executeMgmtCallback(MGMT_SIGNAL_LIBRECORDS, nullptr, 0);
-    }
-    break;
-  // Congestion Control - begin
-  case MGMT_SIGNAL_HTTP_CONGESTED_SERVER:
-    alarm_keeper->signalAlarm(MGMT_ALARM_PROXY_HTTP_CONGESTED_SERVER, data_raw);
-    break;
-  case MGMT_SIGNAL_HTTP_ALLEVIATED_SERVER:
-    alarm_keeper->signalAlarm(MGMT_ALARM_PROXY_HTTP_ALLEVIATED_SERVER, data_raw);
-    break;
-  // Congestion Control - end
-  case MGMT_SIGNAL_CONFIG_FILE_CHILD: {
-    static const MgmtMarshallType fields[] = {MGMT_MARSHALL_STRING, MGMT_MARSHALL_STRING, MGMT_MARSHALL_INT};
-    char *parent                           = nullptr;
-    char *child                            = nullptr;
-    MgmtMarshallInt options                = 0;
-    if (mgmt_message_parse(data_raw, mh->data_len, fields, countof(fields), &parent, &child, &options) != -1) {
-      configFiles->configFileChild(parent, child, (unsigned int)options);
-    } else {
-      mgmt_log("[LocalManager::handleMgmtMsgFromProcesses] "
-               "MGMT_SIGNAL_CONFIG_FILE_CHILD mgmt_message_parse error\n");
-    }
-    // Output pointers are guaranteed to be NULL or valid.
-    ats_free_null(parent);
-    ats_free_null(child);
-  } break;
-  case MGMT_SIGNAL_SAC_SERVER_DOWN:
-    alarm_keeper->signalAlarm(MGMT_ALARM_SAC_SERVER_DOWN, data_raw);
-    break;
-
-  default:
-    break;
   }
 }
 
@@ -1073,5 +1141,131 @@ LocalManager::signalAlarm(int alarm_id, const char *desc, const char *ip)
 {
   if (alarm_keeper) {
     alarm_keeper->signalAlarm((alarm_t)alarm_id, desc, ip);
+  }
+}
+
+void
+LocalManager::handleMgmtMsgFromProcesses(MgmtMessageHdr *mh)
+{
+  char *data_raw = (char *)mh + sizeof(MgmtMessageHdr);
+  switch (mh->msg_id) {
+  case MGMT_SIGNAL_PID:
+    watched_process_pid = *((pid_t *)data_raw);
+    lmgmt->alarm_keeper->signalAlarm(MGMT_ALARM_PROXY_PROCESS_BORN, nullptr);
+    proxy_running++;
+    proxy_launch_pid         = -1;
+    proxy_launch_outstanding = false;
+    RecSetRecordInt("proxy.node.proxy_running", 1, REC_SOURCE_DEFAULT);
+    break;
+
+  case MGMT_SIGNAL_MACHINE_UP:
+    /*
+       {
+       struct in_addr addr;
+       addr.s_addr = *((unsigned int*)data_raw);
+       alarm_keeper->signalAlarm(MGMT_ALARM_PROXY_PEER_BORN, inet_ntoa(addr));
+       }
+     */
+    break;
+  case MGMT_SIGNAL_MACHINE_DOWN:
+    /*
+       {
+       struct in_addr addr;
+       addr.s_addr = *((unsigned int*)data_raw);
+       alarm_keeper->signalAlarm(MGMT_ALARM_PROXY_PEER_DIED, inet_ntoa(addr));
+       }
+     */
+    break;
+
+  // FIX: This is very messy need to correlate mgmt signals and
+  // alarms better
+  case MGMT_SIGNAL_CONFIG_ERROR:
+    alarm_keeper->signalAlarm(MGMT_ALARM_PROXY_CONFIG_ERROR, data_raw);
+    break;
+  case MGMT_SIGNAL_SYSTEM_ERROR:
+    alarm_keeper->signalAlarm(MGMT_ALARM_PROXY_SYSTEM_ERROR, data_raw);
+    break;
+  case MGMT_SIGNAL_LOG_SPACE_CRISIS:
+    alarm_keeper->signalAlarm(MGMT_ALARM_PROXY_LOG_SPACE_CRISIS, data_raw);
+    break;
+  case MGMT_SIGNAL_CACHE_ERROR:
+    alarm_keeper->signalAlarm(MGMT_ALARM_PROXY_CACHE_ERROR, data_raw);
+    break;
+  case MGMT_SIGNAL_CACHE_WARNING:
+    alarm_keeper->signalAlarm(MGMT_ALARM_PROXY_CACHE_WARNING, data_raw);
+    break;
+  case MGMT_SIGNAL_LOGGING_ERROR:
+    alarm_keeper->signalAlarm(MGMT_ALARM_PROXY_LOGGING_ERROR, data_raw);
+    break;
+  case MGMT_SIGNAL_LOGGING_WARNING:
+    alarm_keeper->signalAlarm(MGMT_ALARM_PROXY_LOGGING_WARNING, data_raw);
+    break;
+  case MGMT_SIGNAL_CONFIG_FILE_READ:
+    mgmt_log("[LocalManager::handleMgmtMsgFromProcesses] File done '%d'\n", data_raw);
+    break;
+  case MGMT_SIGNAL_PLUGIN_SET_CONFIG: {
+    char var_name[256];
+    char var_value[256];
+    MgmtType stype;
+    // stype is an enum type, so cast to an int* to avoid warnings. /leif
+    int tokens = sscanf(data_raw, "%255s %d %255s", var_name, (int *)&stype, var_value);
+    if (tokens != 3) {
+      stype = MGMT_INVALID;
+    }
+    switch (stype) {
+    case MGMT_INT:
+      RecSetRecordInt(var_name, ink_atoi64(var_value), REC_SOURCE_EXPLICIT);
+      break;
+    case MGMT_COUNTER:
+    case MGMT_FLOAT:
+    case MGMT_STRING:
+    case MGMT_INVALID:
+    default:
+      mgmt_log("[LocalManager::handleMgmtMsgFromProcesses] "
+               "Invalid plugin set-config msg '%s'\n",
+               data_raw);
+      break;
+    }
+  } break;
+  case MGMT_SIGNAL_LOG_FILES_ROLLED: {
+    Debug("lm", "Rolling logs %s", (char *)data_raw);
+    break;
+  }
+  case MGMT_SIGNAL_LIBRECORDS:
+    if (mh->data_len > 0) {
+      executeMgmtCallback(MGMT_SIGNAL_LIBRECORDS, data_raw, mh->data_len);
+    } else {
+      executeMgmtCallback(MGMT_SIGNAL_LIBRECORDS, nullptr, 0);
+    }
+    break;
+  // Congestion Control - begin
+  case MGMT_SIGNAL_HTTP_CONGESTED_SERVER:
+    alarm_keeper->signalAlarm(MGMT_ALARM_PROXY_HTTP_CONGESTED_SERVER, data_raw);
+    break;
+  case MGMT_SIGNAL_HTTP_ALLEVIATED_SERVER:
+    alarm_keeper->signalAlarm(MGMT_ALARM_PROXY_HTTP_ALLEVIATED_SERVER, data_raw);
+    break;
+  // Congestion Control - end
+  case MGMT_SIGNAL_CONFIG_FILE_CHILD: {
+    static const MgmtMarshallType fields[] = {MGMT_MARSHALL_STRING, MGMT_MARSHALL_STRING, MGMT_MARSHALL_INT};
+    char *parent                           = nullptr;
+    char *child                            = nullptr;
+    MgmtMarshallInt options                = 0;
+    if (mgmt_message_parse(data_raw, mh->data_len, fields, countof(fields), &parent, &child, &options) != -1) {
+      configFiles->configFileChild(parent, child, (unsigned int)options);
+    } else {
+      mgmt_log("[LocalManager::handleMgmtMsgFromProcesses] "
+               "MGMT_SIGNAL_CONFIG_FILE_CHILD mgmt_message_parse error\n");
+    }
+    // Output pointers are guaranteed to be NULL or valid.
+    ats_free_null(parent);
+    ats_free_null(child);
+  } break;
+  case MGMT_SIGNAL_SAC_SERVER_DOWN:
+    alarm_keeper->signalAlarm(MGMT_ALARM_SAC_SERVER_DOWN, data_raw);
+    break;
+
+  default:
+    break;
   }
 }
