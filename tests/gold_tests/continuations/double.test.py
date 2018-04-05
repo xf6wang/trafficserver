@@ -53,68 +53,66 @@ numberOfRequests = 25
 
 # Make calls to the proxy!
 tr = Test.AddTestRun()
-tr.Processes.Default.Command = 'sleep 10' # ensure stats updated
-tr.Processes.Default.ReturnCode = 0
-tr.Processes.Default.StartBefore(server, ready=When.PortOpen(server.Variables.Port))
-tr.Processes.Default.StartBefore(ts, ready=When.PortOpen(ts.Variables.port))
-tr.Processes.Default.StartAfter( 
-    *Test.ParallelizeCommand(tr, numberOfRequests, cmdstr)
-    )
+ps = tr.SpawnCommands(cmdstr=cmdstr, count=numberOfRequests)
+tr.Processes.Default.StartBefore(server, ready=5)
+tr.Processes.Default.StartBefore(ts)
+#server.DelayStart = 1
+ts.StartAfter(*ps)
 tr.StillRunningAfter = ts
 
-comparator_command = '''
-if test "`traffic_ctl metric get continuations_verify.{0}.close.1 | cut -d ' ' -f 2`" -eq "`traffic_ctl metric get continuations_verify.{0}.close.2 | cut -d ' ' -f 2`" ; then\
-     echo yes;\
-    else \
-    echo no; \
-    fi;
-    '''
+# comparator_command = '''
+# if test "`traffic_ctl metric get continuations_verify.{0}.close.1 | cut -d ' ' -f 2`" -eq "`traffic_ctl metric get continuations_verify.{0}.close.2 | cut -d ' ' -f 2`" ; then\
+#      echo yes;\
+#     else \
+#     echo no; \
+#     fi;
+#     '''
 
-records = ts.Disk.File(os.path.join(ts.Variables.RUNTIMEDIR, "records.snap"))
+# records = ts.Disk.File(os.path.join(ts.Variables.RUNTIMEDIR, "records.snap"))
 
-# number of sessions/transactions opened and closed are equal
-tr = Test.AddTestRun()
-tr.DelayStart=10 
-tr.Processes.Default.Command = comparator_command.format('ssn')
-tr.Processes.Default.ReturnCode = 0
-tr.Processes.Default.Env = ts.Env
-tr.Processes.Default.Streams.stdout = Testers.ContainsExpression("yes", 'should verify contents')
-tr.StillRunningAfter = ts
-# for debugging session number
-ssn1 = tr.Processes.Process("session1", 'traffic_ctl metric get continuations_verify.ssn.close.1 > ssn1')
-ssn2 = tr.Processes.Process("session2", 'traffic_ctl metric get continuations_verify.ssn.close.2 > ssn2')
-ssn1.Env = ts.Env
-ssn2.Env = ts.Env
-tr.Processes.Default.StartBefore(ssn1)
-tr.Processes.Default.StartBefore(ssn2)
+# # number of sessions/transactions opened and closed are equal
+# tr = Test.AddTestRun()
+# tr.DelayStart=10 
+# tr.Processes.Default.Command = comparator_command.format('ssn')
+# tr.Processes.Default.ReturnCode = 0
+# tr.Processes.Default.Env = ts.Env
+# tr.Processes.Default.Streams.stdout = Testers.ContainsExpression("yes", 'should verify contents')
+# tr.StillRunningAfter = ts
+# # for debugging session number
+# ssn1 = tr.Processes.Process("session1", 'traffic_ctl metric get continuations_verify.ssn.close.1 > ssn1')
+# ssn2 = tr.Processes.Process("session2", 'traffic_ctl metric get continuations_verify.ssn.close.2 > ssn2')
+# ssn1.Env = ts.Env
+# ssn2.Env = ts.Env
+# tr.Processes.Default.StartBefore(ssn1)
+# tr.Processes.Default.StartBefore(ssn2)
 
-tr = Test.AddTestRun()
-tr.Processes.Default.Command = comparator_command.format('txn')
-tr.Processes.Default.ReturnCode = 0
-tr.Processes.Default.Env = ts.Env
-tr.Processes.Default.Streams.stdout = Testers.ContainsExpression("yes", 'should verify contents')
-tr.StillRunningAfter = ts
-# for debugging transaction number
-txn1 = tr.Processes.Process("transaction1", 'traffic_ctl metric get continuations_verify.txn.close.1 > txn1')
-txn2 = tr.Processes.Process("transaction2", 'traffic_ctl metric get continuations_verify.txn.close.2 > txn2')
-txn1.Env = ts.Env
-txn2.Env = ts.Env
-tr.Processes.Default.StartBefore(txn1)
-tr.Processes.Default.StartBefore(txn2)
+# tr = Test.AddTestRun()
+# tr.Processes.Default.Command = comparator_command.format('txn')
+# tr.Processes.Default.ReturnCode = 0
+# tr.Processes.Default.Env = ts.Env
+# tr.Processes.Default.Streams.stdout = Testers.ContainsExpression("yes", 'should verify contents')
+# tr.StillRunningAfter = ts
+# # for debugging transaction number
+# txn1 = tr.Processes.Process("transaction1", 'traffic_ctl metric get continuations_verify.txn.close.1 > txn1')
+# txn2 = tr.Processes.Process("transaction2", 'traffic_ctl metric get continuations_verify.txn.close.2 > txn2')
+# txn1.Env = ts.Env
+# txn2.Env = ts.Env
+# tr.Processes.Default.StartBefore(txn1)
+# tr.Processes.Default.StartBefore(txn2)
 
-# session count is positive,
-tr = Test.AddTestRun()
-tr.Processes.Default.Command = "traffic_ctl metric get continuations_verify.ssn.close.1"
-tr.Processes.Default.ReturnCode = 0
-tr.Processes.Default.Env = ts.Env
-tr.Processes.Default.Streams.stdout = Testers.ExcludesExpression(" 0", 'should be nonzero')
-tr.StillRunningAfter = ts
+# # session count is positive,
+# tr = Test.AddTestRun()
+# tr.Processes.Default.Command = "traffic_ctl metric get continuations_verify.ssn.close.1"
+# tr.Processes.Default.ReturnCode = 0
+# tr.Processes.Default.Env = ts.Env
+# tr.Processes.Default.Streams.stdout = Testers.ExcludesExpression(" 0", 'should be nonzero')
+# tr.StillRunningAfter = ts
 
-# and we receive the same number of transactions as we asked it to make
-tr = Test.AddTestRun()
-tr.Processes.Default.Command = "traffic_ctl metric get continuations_verify.txn.close.1"
-tr.Processes.Default.ReturnCode = 0
-tr.Processes.Default.Env = ts.Env
-tr.Processes.Default.Streams.stdout = Testers.ContainsExpression(
-    "continuations_verify.txn.close.1 {}".format(numberOfRequests), 'should be the number of transactions we made')
-tr.StillRunningAfter = ts
+# # and we receive the same number of transactions as we asked it to make
+# tr = Test.AddTestRun()
+# tr.Processes.Default.Command = "traffic_ctl metric get continuations_verify.txn.close.1"
+# tr.Processes.Default.ReturnCode = 0
+# tr.Processes.Default.Env = ts.Env
+# tr.Processes.Default.Streams.stdout = Testers.ContainsExpression(
+#     "continuations_verify.txn.close.1 {}".format(numberOfRequests), 'should be the number of transactions we made')
+# tr.StillRunningAfter = ts
