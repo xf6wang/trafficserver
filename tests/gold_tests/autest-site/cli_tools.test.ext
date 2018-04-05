@@ -30,17 +30,27 @@ Tools to help with TestRun commands
 #   *Test.ParallelizeCommand(tr, numberOfRequests, curlcmd)
 #   )
 
-def parallel_command(self, tr, num, cmd):
-    ret=[]
+def spawn_commands(self, cmdstr, count, retcode = 0, use_default=True):
+    ret=[] 
 
-    for cnt in range(0,num):
-        ret.append(
-            tr.Processes.Process(
-                name="cmdline-{num}".format(num=cnt),
-                cmdstr=cmd,
-                returncode = 0
-                )
+    if use_default:
+        count = int(count) - 1  
+
+    for cnt in range(0,count):  
+        ret.append(  
+            self.Processes.Process(  
+                name="cmdline-{num}".format(num=cnt),  
+                cmdstr = cmdstr,  
+                returncode = retcode
+                )  
             )
-    return ret
 
-ExtendTest(parallel_command, name="ParallelizeCommand")
+    if use_default:
+        self.Processes.Default.Command = cmdstr
+        self.Processes.Default.ReturnCode = retcode
+        self.Processes.Default.StartBefore(
+            *ret
+        )
+    return ret 
+
+ExtendTestRun(spawn_commands, name="SpawnCommands")
