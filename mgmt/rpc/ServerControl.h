@@ -33,6 +33,22 @@
 #include <unordered_set>
 #include <unordered_map>
 
+template <typename... Params>
+class RPCCallbackBase 
+{
+using Parameters = std::tuple<Params ...>;
+public:
+  RPCCallbackBase() : params(nullptr) {}
+  explicit RPCCallbackBase(Parameters p) : params(p) {}
+
+  Parameters get() {return params;}
+  void set(Parameters p) {params = p;}
+
+  virtual TSMgmtError execute() = 0;
+private:
+  Parameters params;
+};
+
 /**
   Simple RPC server. Allows for registration of callbacks in the form (int fd, void* buf, size_t buflen). Currently, it is the
   responsibility of the callback function to deseralize the incoming message.
@@ -43,7 +59,7 @@
 class RPCServerController 
 {
   /// No deserialization logic so we must force all callbacks to be of the same form. 
-  typedef std::function<TSMgmtError(int, void*, size_t)> RPCCallback;
+  // typedef std::function<TSMgmtError(int, void*, size_t)> RPCCallback;
   typedef std::function<void()> eofCallback;
 
   struct Clients 
@@ -75,7 +91,7 @@ public:
   explicit RPCServerController(mode_t rpc_mode);
 
   /// Add a callback based on a key. Each key must be unique in MgmtSignals.h
-  void registerControlCallback(int key, RPCCallback);
+  void registerControlCallback(int key, RPCCallbackBase );
   void registerControlEOFHandler(eofCallback const &cb = std::function<void()>());
 
   int bindSocket();
