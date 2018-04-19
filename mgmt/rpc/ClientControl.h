@@ -1,6 +1,6 @@
 /** @file
 
-  Public REC_SIGNAL defines
+  A client connection to the rpc server. 
 
   @section license License
 
@@ -21,27 +21,25 @@
   limitations under the License.
  */
 
-#pragma once
+#ifndef _CLIENT_CONTROLLER_H
+#define _CLIENT_CONTROLLER_H
 
-// copy from mgmt/BaseManager.h
-#define REC_SIGNAL_PID 100
-#define REC_SIGNAL_MACHINE_UP 101
-#define REC_SIGNAL_MACHINE_DOWN 102
-#define REC_SIGNAL_CONFIG_ERROR 103
-#define REC_SIGNAL_SYSTEM_ERROR 104
-#define REC_SIGNAL_LOG_SPACE_CRISIS 105
-#define REC_SIGNAL_CONFIG_FILE_READ 106
-#define REC_SIGNAL_CACHE_ERROR 107
-#define REC_SIGNAL_CACHE_WARNING 108
-#define REC_SIGNAL_LOGGING_ERROR 109
-#define REC_SIGNAL_LOGGING_WARNING 110
-// Currently unused: 11
-#define REC_SIGNAL_PLUGIN_CONFIG_REG 112
-#define REC_SIGNAL_PLUGIN_ADD_REC 113
-#define REC_SIGNAL_PLUGIN_SET_CONFIG 114
-#define REC_SIGNAL_LOG_FILES_ROLLED 115
-#define REC_SIGNAL_LIBRECORDS 116
-#define REC_SIGNAL_HTTP_CONGESTED_SERVER 120
-#define REC_SIGNAL_HTTP_ALLEVIATED_SERVER 121
+#include "MgmtSignals.h"
+#include "ts/ink_apidefs.h"
+#include "ts/ink_sock.h"
+#include <string>
 
-#define MGMTAPI_SOCKET_NAME "mgmtapi.sock"
+class RPCClientController
+{
+public:
+    RPCClientController();
+    ~RPCClientController();
+
+    void connectServer();
+    int fd() { return rpc_sockfd; }
+private: 
+    std::string sockpath;
+    int rpc_sockfd = ts::NO_FD;
+};
+
+#endif /* _CLIENT_CONTROLLER_H */

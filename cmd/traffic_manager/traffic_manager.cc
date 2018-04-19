@@ -41,6 +41,7 @@
 #include "CoreAPI.h"
 
 #include "LocalManager.h"
+#include "ServerControl.h"
 #include "TSControlMain.h"
 #include "EventControlMain.h"
 
@@ -69,9 +70,13 @@
 // These globals are still referenced directly by management API.
 LocalManager *lmgmt = nullptr;
 FileManager *configFiles;
+RPCServerController *rpc_server;
 
 static void fileUpdated(char *fname, bool incVersion);
 static void runAsUser(const char *userName);
+
+static void loadTSControlCallbacks(RPCServerController *rpc_server);
+static void loadManagerCallbacks(LocalManager *lmgmt, RPCServerController *rpc_server);
 
 #if defined(freebsd)
 extern "C" int getpwnam_r(const char *name, struct passwd *result, char *buffer, size_t buflen, struct passwd **resptr);
@@ -680,21 +685,13 @@ main(int argc, const char **argv)
 
   // Setup the API and event sockets
   std::string rundir(RecConfigReadRuntimeDir());
-  std::string apisock(Layout::relative_to(rundir, MGMTAPI_MGMT_SOCKET_NAME));
   std::string eventsock(Layout::relative_to(rundir, MGMTAPI_EVENT_SOCKET_NAME));
 
   mode_t oldmask = umask(0);
   mode_t newmode = api_socket_is_restricted() ? 00700 : 00777;
 
-  int mgmtapiFD         = -1; // FD for the api interface to issue commands
   int eventapiFD        = -1; // FD for the api and clients to handle event callbacks
   char mgmtapiFailMsg[] = "Traffic server management API service Interface Failed to Initialize.";
-
-  mgmtapiFD = bind_unix_domain_socket(apisock.c_str(), newmode);
-  if (mgmtapiFD == -1) {
-    mgmt_log("[WebIntrMain] Unable to set up socket for handling management API calls. API socket path = %s\n", apisock.c_str());
-    lmgmt->alarm_keeper->signalAlarm(MGMT_ALARM_WEB_ERROR, mgmtapiFailMsg);
-  }
 
   eventapiFD = bind_unix_domain_socket(eventsock.c_str(), newmode);
   if (eventapiFD == -1) {
@@ -703,7 +700,25 @@ main(int argc, const char **argv)
   }
 
   umask(oldmask);
-  ink_thread_create(nullptr, ts_ctrl_main, &mgmtapiFD, 0, 0, nullptr);
+
+  ink_event_system_init(makeModuleVersion(1, 0, PRIVATE_MODULE_HEADER));
+  eventProcessor.start(1); // just start one thread for now. 
+
+  // Setup RPC mechanism. 
+  rpc_server = new RPCServerController(newmode);
+
+  if (rpc_server->bindSocket() == -1) {
+  //mgmt_log("[WebIntrMain] Unable to set up socket for handling management API calls. API socket path = %s\n", apisock.c_str());
+    lmgmt->alarm_keeper->signalAlarm(MGMT_ALARM_WEB_ERROR, mgmtapiFailMsg);
+  }
+
+  loadTSControlCallbacks(rpc_server);
+  lmgmt->loadRPCCallbacks(rpc_server);
+
+  // only start once all callbacks registered. 
+  rpc_server->start();
+
+
   ink_thread_create(nullptr, event_callback_main, &eventapiFD, 0, 0, nullptr);
 
   mgmt_log("[TrafficManager] Setup complete\n");
@@ -726,7 +741,7 @@ main(int argc, const char **argv)
   uint64_t last_start_epoc_s = 0;  // latest start attempt in seconds since epoc
 
   for (;;) {
-    lmgmt->processEventQueue();
+    lmgmt->processEventQueue(); // events are queued through rpc lib.
     lmgmt->pollMgmtProcessServer();
 
     if (binding_version != metrics_version) {
@@ -1101,3 +1116,31 @@ runAsUser(const char *userName)
 #endif
   }
 } /* End runAsUser() */
+
+static void loadTSControlCallbacks(RPCServerController *rpc_server)
+{
+  rpc_server->registerControlCallback(static_cast<int>(OpType::RECORD_SET), handle_control_message);
+  rpc_server->registerControlCallback(static_cast<int>(OpType::RECORD_GET), handle_control_message);
+  rpc_server->registerControlCallback(static_cast<int>(OpType::PROXY_STATE_GET), handle_control_message);
+  rpc_server->registerControlCallback(static_cast<int>(OpType::PROXY_STATE_SET), handle_control_message);
+  rpc_server->registerControlCallback(static_cast<int>(OpType::RECONFIGURE), handle_control_message);
+  rpc_server->registerControlCallback(static_cast<int>(OpType::RESTART), handle_control_message);
+  rpc_server->registerControlCallback(static_cast<int>(OpType::BOUNCE), handle_control_message);
+  rpc_server->registerControlCallback(static_cast<int>(OpType::STOP), handle_control_message);
+  rpc_server->registerControlCallback(static_cast<int>(OpType::DRAIN), handle_control_message);
+  rpc_server->registerControlCallback(static_cast<int>(OpType::EVENT_RESOLVE), handle_control_message);
+  rpc_server->registerControlCallback(static_cast<int>(OpType::EVENT_GET_MLT), handle_control_message);
+  rpc_server->registerControlCallback(static_cast<int>(OpType::EVENT_ACTIVE), handle_control_message);
+  rpc_server->registerControlCallback(static_cast<int>(OpType::EVENT_REG_CALLBACK), handle_control_message);
+  rpc_server->registerControlCallback(static_cast<int>(OpType::EVENT_UNREG_CALLBACK), handle_control_message);
+  rpc_server->registerControlCallback(static_cast<int>(OpType::EVENT_NOTIFY), handle_control_message);
+  rpc_server->registerControlCallback(static_cast<int>(OpType::STATS_RESET_NODE), handle_control_message);
+  rpc_server->registerControlCallback(static_cast<int>(OpType::STORAGE_DEVICE_CMD_OFFLINE), handle_control_message);
+  rpc_server->registerControlCallback(static_cast<int>(OpType::RECORD_MATCH_GET), handle_control_message);
+  rpc_server->registerControlCallback(static_cast<int>(OpType::API_PING), handle_control_message);
+  rpc_server->registerControlCallback(static_cast<int>(OpType::SERVER_BACKTRACE), handle_control_message);
+  rpc_server->registerControlCallback(static_cast<int>(OpType::RECORD_DESCRIBE_CONFIG), handle_control_message);
+  rpc_server->registerControlCallback(static_cast<int>(OpType::LIFECYCLE_MESSAGE), handle_control_message);
+  rpc_server->registerControlCallback(static_cast<int>(OpType::HOST_STATUS_UP), handle_control_message);
+  rpc_server->registerControlCallback(static_cast<int>(OpType::HOST_STATUS_DOWN), handle_control_message);
+}

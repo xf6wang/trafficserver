@@ -35,11 +35,6 @@
 
 #include "mgmtapi.h"
 
-typedef struct {
-  int fd;
-  struct sockaddr *adr;
-} ClientT;
-
-void *ts_ctrl_main(void *arg);
+TSMgmtError handle_control_message(int fd, void *req, size_t reqlen);
 
 #endif

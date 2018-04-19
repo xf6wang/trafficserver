@@ -25,6 +25,7 @@ AM_CPPFLAGS += \
   -I$(abs_top_srcdir)/proxy/shared \
   -I$(abs_top_srcdir)/proxy/logging \
   -I$(abs_top_srcdir)/mgmt \
+  -I$(abs_top_srcdir)/mgmt/rpc \
   -I$(abs_top_srcdir)/mgmt/utils \
   -I$(abs_top_srcdir)/proxy/http \
   $(TS_INCLUDES) \
@@ -58,6 +59,7 @@ test_UDPNet_CPPFLAGS = \
   -I$(abs_top_srcdir)/proxy/http \
   -I$(abs_top_srcdir)/proxy/logging \
   -I$(abs_top_srcdir)/mgmt \
+  -I$(abs_top_srcdir)/mgmt/rpc \
   -I$(abs_top_srcdir)/mgmt/utils \
   @OPENSSL_INCLUDES@
 

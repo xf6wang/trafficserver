@@ -36,6 +36,7 @@
 
 #include "Alarms.h"
 #include "BaseManager.h"
+#include "ServerControl.h"
 #include <records/I_RecHttp.h>
 #include <syslog.h>
 #if TS_HAS_WCCP
@@ -98,6 +99,7 @@ public:
   void hostStatusSetUp(const char *name);
 
   bool processRunning();
+  void loadRPCCallbacks(RPCServerController *rpc_server);
 
   bool run_proxy;
   bool proxy_recoverable = true; // false if traffic_server cannot recover with a reboot
@@ -125,6 +127,7 @@ public:
 
   int process_server_sockfd = ts::NO_FD;
   int watched_process_fd    = ts::NO_FD;
+
 #if HAVE_EVENTFD
   int wakeup_fd = ts::NO_FD; // external trigger to stop polling
 #endif
